@@ -1,0 +1,14 @@
+INFO:     Started server process [93777]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:49950 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49950 - "GET /style.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49964 - "GET /script.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49964 - "GET /api/gpu-status HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: GET https://generativelanguage.googleapis.com/v1beta/models "HTTP/1.1 400 Bad Request"
+INFO:     127.0.0.1:49964 - "POST /api/validate-api-key HTTP/1.1" 400 Bad Request
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [93777]
