@@ -12,6 +12,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from ollama_detector import OllamaDetector
 from gemini_detector import GeminiDetector
+from prefilter import LogPrefilter
 
 # Force Ollama to use CUDA backend instead of Vulkan for this process.
 # This fixes hybrid GPU setups where Vulkan picks the wrong GPU.
@@ -134,19 +135,21 @@ async def upload_log(
     mode: str = Form("auto"),
     speed: str = Form("balanced"),
     google_api_key: str = Form(None),
-    chunk_percentage: int = Form(10)
+    chunk_percentage: int = Form(10),
+    use_prefilter: str = Form("false")
 ):
     if model.startswith("gemini-"):
         speed_map = {"balanced": 1, "fast": 2, "max": 3}
     else:
         speed_map = {"balanced": 2, "fast": 4, "max": 6}
     max_concurrency = speed_map.get(speed, 2)
+    prefilter_enabled = use_prefilter.lower() == "true"
     return StreamingResponse(
-        event_generator(file, model, mode, max_concurrency, google_api_key, chunk_percentage),
+        event_generator(file, model, mode, max_concurrency, google_api_key, chunk_percentage, prefilter_enabled),
         media_type="text/event-stream"
     )
 
-async def event_generator(file: UploadFile, model: str, mode: str, max_concurrency: int = 3, google_api_key: str = None, chunk_percentage: int = 10):
+async def event_generator(file: UploadFile, model: str, mode: str, max_concurrency: int = 3, google_api_key: str = None, chunk_percentage: int = 10, use_prefilter: bool = False):
     try:
         contents = await file.read()
     except Exception as e:
@@ -165,29 +168,139 @@ async def event_generator(file: UploadFile, model: str, mode: str, max_concurren
         yield f"data: {json.dumps({'type': 'result', 'total_lines': 0, 'anomalies': []})}\n\n"
         return
 
-    if model.startswith("gemini-"):
-        detector = GeminiDetector(model_name=model, api_key=google_api_key, max_concurrency=max_concurrency)
-    else:
-        detector = OllamaDetector(model_name=model, max_concurrency=max_concurrency)
+    original_count = len(logs_to_analyze)
+    ml_scores = {}
+
+    # ===== STAGE 1: ML Pre-filter (inspired by AICoE/log-anomaly-detector) =====
+    if use_prefilter and len(logs_to_analyze) > 50:
+        import threading
+        import queue as qmod
+
+        print(f"[PIPELINE] STAGE 1: ML Prefilter — scanning {original_count} lines...")
+        prefilter = LogPrefilter()
+        progress_queue = qmod.Queue()
+
+        def pf_cb(current, total, message=None):
+            progress_queue.put(("progress", current, total, message))
+
+        yield f"data: {json.dumps({'type': 'prefilter', 'status': 'training', 'total': original_count, 'stage': '1/2'})}\n\n"
+
+        loop = asyncio.get_running_loop()
+        future = loop.run_in_executor(None, lambda: prefilter.fit(
+            [c for _, c in logs_to_analyze],
+            progress_callback=pf_cb
+        ))
+
+        while not future.done():
+            try:
+                typ, current, total, msg = progress_queue.get_nowait()
+                if typ == "progress":
+                    yield f"data: {json.dumps({
+                        'type': 'prefilter_progress',
+                        'current': current,
+                        'total': total,
+                        'stage': '1/2',
+                        'message': msg or ''
+                    })}\n\n"
+            except qmod.Empty:
+                pass
+            await asyncio.sleep(0.1)
+
+        while True:
+            try:
+                typ, current, total, msg = progress_queue.get_nowait()
+                if typ == "progress":
+                    yield f"data: {json.dumps({
+                        'type': 'prefilter_progress',
+                        'current': current,
+                        'total': total,
+                        'stage': '1/2',
+                        'message': msg or ''
+                    })}\n\n"
+            except qmod.Empty:
+                break
+
+        exc = future.exception()
+        if exc:
+            yield f"data: {json.dumps({'type': 'error', 'message': f'ML Prefilter failed: {exc}'})}\n\n"
+            return
+
+        results = prefilter.filter(logs_to_analyze)
+        # ML scores map: line_num → score
+        ml_scores = {line_num: score for line_num, content, score in results}
+        prefilter_flagged = len(results)
+        prefilter_filtered_out = original_count - prefilter_flagged
+
+        print(f"[PIPELINE] STAGE 1 complete: flagged {prefilter_flagged}/{original_count} lines ({prefilter_filtered_out} filtered out)")
+        print(f"[PIPELINE] → ML detected {prefilter_flagged} anomalies; LLM will explain them")
+
+        yield f"data: {json.dumps({
+            'type': 'prefilter',
+            'status': 'done',
+            'stage': '1/2',
+            'total': original_count,
+            'flagged': prefilter_flagged,
+            'filtered_out': prefilter_filtered_out
+        })}\n\n"
+
+        logs_to_analyze = [(ln, c) for ln, c, _ in results]
+
+        if not logs_to_analyze:
+            yield f"data: {json.dumps({'type': 'result', 'total_lines': original_count, 'anomalies': [], 'prefilter_enabled': True, 'prefilter_flagged': 0, 'prefilter_remaining': 0, 'prefilter_filtered_out': original_count})}\n\n"
+            return
+    elif use_prefilter:
+        print(f"[PIPELINE] STAGE 1: skipped (only {len(logs_to_analyze)} lines, need > 50)")
+        yield f"data: {json.dumps({
+            'type': 'prefilter', 'status': 'skipped', 'stage': '1/2',
+            'message': 'File too small for ML prefilter (less than 50 lines)'
+        })}\n\n"
+
+    # ===== STAGE 2: LLM — explanation only (if prefilter detected) or full analysis =====
+    explain_only = bool(ml_scores)
+    print(f"[PIPELINE] STAGE 2: {'Explanation' if explain_only else 'Analysis'} — "
+          f"{len(logs_to_analyze)} lines with {model}")
 
     queue = asyncio.Queue()
 
     async def progress_callback(current, total):
-        await queue.put({"type": "progress", "current": current, "total": total})
+        await queue.put({"type": "progress", "current": current, "total": total, "stage": "2/2"})
 
     async def run_analysis():
+        nonlocal ml_scores
         try:
-            results = await detector.analyze_batch(
-                logs_to_analyze,
-                mode=mode,
-                progress_callback=progress_callback,
-                chunk_percentage=chunk_percentage,
-                total_lines=len(lines)
-            )
+            if model.startswith("gemini-"):
+                detector = GeminiDetector(model_name=model, api_key=google_api_key, max_concurrency=max_concurrency)
+            else:
+                detector = OllamaDetector(model_name=model, max_concurrency=max_concurrency)
+
+            if explain_only:
+                results = await detector.explain_batch(
+                    logs_to_analyze,
+                    mode=mode,
+                    progress_callback=progress_callback,
+                    chunk_percentage=chunk_percentage,
+                )
+            else:
+                results = await detector.analyze_batch(
+                    logs_to_analyze,
+                    mode=mode,
+                    progress_callback=progress_callback,
+                    chunk_percentage=chunk_percentage,
+                    total_lines=len(logs_to_analyze)
+                )
 
             anomalies = []
             for res in results:
-                if res["anomaly"]:
+                if explain_only:
+                    ms = ml_scores.get(res["line"])
+                    score_display = f"ML Score: {ms:.4f}" if ms is not None else "ML Detected"
+                    anomalies.append({
+                        "line": res["line"],
+                        "content": res["content"],
+                        "score": score_display,
+                        "prediction": res["reason"]
+                    })
+                elif res["anomaly"]:
                     anomalies.append({
                         "line": res["line"],
                         "content": res["content"],
@@ -195,13 +308,27 @@ async def event_generator(file: UploadFile, model: str, mode: str, max_concurren
                         "prediction": res["reason"]
                     })
 
+            prefilter_flagged = prefilter_filtered_out = prefilter_remaining = 0
+            if explain_only:
+                prefilter_flagged = len(logs_to_analyze)
+                prefilter_filtered_out = original_count - len(logs_to_analyze)
+                prefilter_remaining = len(logs_to_analyze)
+
             await queue.put({
                 "type": "result",
+                "stage": "complete",
                 "total_lines": len(lines),
-                "anomalies": anomalies
+                "anomalies": anomalies,
+                "prefilter_enabled": use_prefilter,
+                "prefilter_flagged": prefilter_flagged,
+                "prefilter_filtered_out": prefilter_filtered_out,
+                "prefilter_remaining": prefilter_remaining
             })
+            print(f"[PIPELINE] STAGE 2 complete: {len(anomalies)} anomalies explained in {len(logs_to_analyze)} lines")
         except Exception as e:
-            await queue.put({"type": "error", "message": str(e)})
+            err_msg = f"{'Explanation' if explain_only else 'Analysis'} failed: {str(e)}"
+            print(f"[PIPELINE] STAGE 2 error: {err_msg}")
+            await queue.put({"type": "error", "message": err_msg})
         finally:
             await queue.put(None)
 

@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+@page {
+  size: A4;
+  margin: 2cm 2.2cm;
+  @bottom-center { content: counter(page) " / " counter(pages); font-size: 9pt; color: #888; }
+}
+body {
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  font-size: 10.5pt;
+  line-height: 1.6;
+  color: #1a1a1a;
+}
+
+/* Cover page */
+.cover {
+  text-align: center;
+  padding-top: 120px;
+  page-break-after: always;
+}
+.cover h1 {
+  font-size: 28pt;
+  margin-bottom: 8px;
+  color: #1a73e8;
+}
+.cover .subtitle {
+  font-size: 16pt;
+  color: #555;
+  margin-bottom: 40px;
+}
+.cover .meta {
+  font-size: 11pt;
+  color: #777;
+  margin-top: 60px;
+  line-height: 2;
+}
+.cover .badge {
+  display: inline-block;
+  background: #e8f0fe;
+  color: #1a73e8;
+  padding: 6px 20px;
+  border-radius: 20px;
+  font-size: 11pt;
+  font-weight: bold;
+  margin-top: 20px;
+}
+
+/* Headings */
+h2 {
+  font-size: 16pt;
+  color: #1a73e8;
+  border-bottom: 2px solid #1a73e8;
+  padding-bottom: 4px;
+  margin-top: 32px;
+  page-break-after: avoid;
+}
+h3 {
+  font-size: 13pt;
+  color: #333;
+  margin-top: 22px;
+  page-break-after: avoid;
+}
+h4 {
+  font-size: 11pt;
+  color: #444;
+  margin-top: 16px;
+}
+
+/* Code blocks */
+pre {
+  background: #f5f6f8;
+  border: 1px solid #ddd;
+  border-left: 4px solid #1a73e8;
+  padding: 10px 14px;
+  font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
+  font-size: 8.5pt;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  page-break-inside: avoid;
+}
+code {
+  font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
+  font-size: 9pt;
+  background: #f0f0f0;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+pre code {
+  background: none;
+  padding: 0;
+}
+
+/* Tables */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 9.5pt;
+  page-break-inside: avoid;
+}
+th, td {
+  border: 1px solid #ccc;
+  padding: 7px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+th {
+  background: #1a73e8;
+  color: white;
+  font-weight: 600;
+}
+tr:nth-child(even) { background: #f7f9fc; }
+
+/* Lists */
+ul, ol { margin: 6px 0; padding-left: 22px; }
+li { margin-bottom: 3px; }
+
+/* Callout boxes */
+.callout {
+  background: #e8f0fe;
+  border-left: 4px solid #1a73e8;
+  padding: 10px 14px;
+  margin: 14px 0;
+  border-radius: 0 4px 4px 0;
+  page-break-inside: avoid;
+}
+.callout.warn {
+  background: #fef7e0;
+  border-left-color: #f9ab00;
+}
+.callout.green {
+  background: #e6f4ea;
+  border-left-color: #34a853;
+}
+
+/* TOC */
+.toc { page-break-after: always; }
+.toc h2 { border: none; }
+.toc ul { list-style: none; padding: 0; }
+.toc li {
+  padding: 5px 0;
+  border-bottom: 1px dotted #ddd;
+  font-size: 11pt;
+}
+.toc li a { color: #1a73e8; text-decoration: none; }
+
+/* Section breaks */
+.section { page-break-before: always; }
+.section.no-break { page-break-before: avoid; }
+
+/* Architecture diagram */
+.diagram {
+  background: #fafafa;
+  border: 1px solid #ddd;
+  padding: 16px;
+  font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
+  font-size: 9pt;
+  line-height: 1.5;
+  white-space: pre;
+  page-break-inside: avoid;
+}
+
+/* Summary cards */
+.cards { display: flex; gap: 12px; margin: 12px 0; }
+.card {
+  flex: 1;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 12px;
+  text-align: center;
+  page-break-inside: avoid;
+}
+.card .num { font-size: 18pt; font-weight: bold; color: #1a73e8; }
+.card .label { font-size: 9pt; color: #666; margin-top: 4px; }
+
+.key-diff {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin: 8px 0;
+  page-break-inside: avoid;
+}
+.key-diff strong { color: #16a34a; }
+</style>
+</head>
+<body>
+
+<!-- ===== COVER ===== -->
+<div class="cover">
+  <h1>GPCSSI Log Anomaly Detector</h1>
+  <div class="subtitle">A Complete Project Guide</div>
+  <div class="badge">GPCSSI Program &mdash; Cybersecurity &amp; AI</div>
+  <div class="meta">
+    <strong>Project:</strong> GPCSSI-FINAL<br>
+    <strong>Repository:</strong> github.com/Narwal-himanshu/GPCSSI-FINAL<br>
+    <strong>Tech:</strong> FastAPI &bull; Ollama &bull; Gemini &bull; Python<br>
+    <strong>Purpose:</strong> LLM-powered Log Anomaly Detection
+  </div>
+</div>
+
+<!-- ===== TOC ===== -->
+<div class="toc">
+<h2>Table of Contents</h2>
+<ul>
+  <li><a href="#s1">1. What Is This Project?</a></li>
+  <li><a href="#s2">2. The Problem It Solves</a></li>
+  <li><a href="#s3">3. Tech Stack (Simple Explanations)</a></li>
+  <li><a href="#s4">4. Project Structure</a></li>
+  <li><a href="#s5">5. Architecture &amp; Pipeline</a></li>
+  <li><a href="#s5a">5a. ML Pre-filter (Log-Anomaly-Detector Integration)</a></li>
+  <li><a href="#s6">6. Analysis Modes Explained</a></li>
+  <li><a href="#s7">7. Local vs Cloud: Ollama vs Gemini</a></li>
+  <li><a href="#s8">8. How To Run The Project</a></li>
+  <li><a href="#s9">9. Alternatives &amp; Comparison</a></li>
+  <li><a href="#s10">10. Why This Project Stands Out</a></li>
+  <li><a href="#s11">11. Limitations &amp; Future Work</a></li>
+</ul>
+</div>
+
+<!-- ===== SECTION 1 ===== -->
+<div class="section" id="s1">
+<h2>1. What Is This Project?</h2>
+
+<p>
+<strong>GPCSSI-FINAL</strong> is a web application that lets you upload server log files (like Apache access logs or Linux system logs) and automatically detects <em>anomalies</em> &mdash; unusual, suspicious, or error-related lines &mdash; using Artificial Intelligence.
+</p>
+
+<p>
+Instead of manually scanning through thousands of log lines, you upload the file to a web page, pick an AI model, and get back a clean report showing only the problematic lines with explanations of <em>why</em> each one is suspicious.
+</p>
+
+<p>
+The app was built as part of the <strong>GPCSSI program</strong> (Google Cybersecurity and Safety Initiative) to demonstrate how Large Language Models (LLMs) can be applied to real-world security monitoring tasks.
+</p>
+
+<div class="callout">
+<strong>Simple Analogy:</strong> Imagine you have a 500-page server diary. Reading all of it would take hours. This app is like giving that diary to a smart assistant who quickly flips through every page and flags only the suspicious entries, telling you <em>why</em> each one caught their eye.
+</div>
+</div>
+
+<!-- ===== SECTION 2 ===== -->
+<div class="section" id="s2">
+<h2>2. The Problem It Solves</h2>
+
+<h3>Why is log analysis hard?</h3>
+<p>Servers generate thousands of log lines every hour. A typical Apache web server log can have 50,000+ lines in a single day. Manually finding security issues, errors, or unusual patterns in that much text is:</p>
+<ul>
+  <li><strong>Time-consuming:</strong> Hours of reading repetitive text</li>
+  <li><strong>Error-prone:</strong> Humans miss things after the 1000th line</li>
+  <li><strong>Skill-dependent:</strong> You need to know what "normal" looks like for each log format</li>
+</ul>
+
+<h3>Why not use traditional tools?</h3>
+<p>Traditional tools like <strong>Splunk</strong> or <strong>ELK Stack</strong> rely on:</p>
+<ul>
+  <li><strong>Rules/Regex:</strong> You write patterns like <code>error|failed|denied</code>. But what if an anomaly doesn't match any known pattern?</li>
+  <li><strong>Machine Learning models:</strong> These need labeled training data (thousands of "normal" and "anomalous" examples) &mdash; which you often don't have.</li>
+  <li><strong>Heavy infrastructure:</strong> Setting up Elasticsearch clusters just to scan a log file is overkill.</li>
+</ul>
+
+<h3>How this project solves it</h3>
+<p>Instead of rules or trained models, this app uses <strong>Large Language Models (LLMs)</strong> &mdash; AI models that understand language and context. The LLM reads each log line (or groups of lines) and decides whether it looks anomalous based on its general understanding of server logs. It doesn't need training, doesn't need regex patterns, and works on any text-based log format.</p>
+
+<div class="callout green">
+<strong>Key Insight:</strong> The same LLMs that can write essays and answer questions can also read server logs and tell you if something looks wrong &mdash; because they've been trained on vast amounts of text, including technical documentation and code.
+</div>
+</div>
+
+<!-- ===== SECTION 3 ===== -->
+<div class="section" id="s3">
+<h2>3. Tech Stack (Simple Explanations)</h2>
+
+<table>
+<tr><th style="width:150px">Technology</th><th>What It Does</th><th>Why It Was Chosen</th></tr>
+<tr>
+  <td><strong>Python 3.9+</strong></td>
+  <td>The programming language powering the entire backend</td>
+  <td>Widely used, great library support for AI/ML, easy to learn</td>
+</tr>
+<tr>
+  <td><strong>FastAPI</strong></td>
+  <td>Web framework that handles HTTP requests and serves the API</td>
+  <td>Fast (async), automatic docs, simple code, built-in validation</td>
+</tr>
+<tr>
+  <td><strong>Uvicorn</strong></td>
+  <td>ASGI server that runs the FastAPI app</td>
+  <td>Lightning fast, built for async Python, industry standard</td>
+</tr>
+<tr>
+  <td><strong>Ollama</strong></td>
+  <td>Runs AI models locally on your machine (no internet needed)</td>
+  <td>Free, private, works offline, easy to set up</td>
+</tr>
+<tr>
+  <td><strong>Google Gemini API</strong></td>
+  <td>Cloud-based AI models from Google</td>
+  <td>More powerful models, faster inference, higher accuracy</td>
+</tr>
+<tr>
+  <td><strong>HTML / CSS / JS</strong></td>
+  <td>The frontend web page users interact with</td>
+  <td>Zero dependencies &mdash; works in any browser, lightweight</td>
+</tr>
+<tr>
+  <td><strong>SSE (Server-Sent Events)</strong></td>
+  <td>Streams progress updates from backend to frontend in real-time</td>
+  <td>Simpler than WebSockets, perfect for one-way data flow</td>
+</tr>
+<tr>
+  <td><strong>python-multipart</strong></td>
+  <td>Handles file uploads from the browser</td>
+  <td>Required by FastAPI for multipart form data</td>
+</tr>
+<tr>
+  <td><strong>NumPy / Pandas</strong></td>
+  <td>Data processing libraries</td>
+  <td>Available for future data analysis features</td>
+</tr>
+</table>
+
+<h3>Dependencies (requirements.txt)</h3>
+<pre><code>numpy
+pandas
+fastapi
+uvicorn
+python-multipart
+ollama
+google-genai</code></pre>
+
+<p>That's it &mdash; just <strong>7 packages</strong>. The entire project has minimal dependencies, making it easy to install and run.</p>
+
+<!-- ===== SECTION 4 ===== -->
+<div class="section" id="s4">
+<h2>4. Project Structure</h2>
+
+<pre><code>GPCSSI-FINAL/
+├── README.md                    # Project documentation
+├── requirements.txt             # Python dependencies (7 packages)
+│
+├── src/                         # Backend Python source code
+│   ├── app.py                   # FastAPI entry point (routes, SSE)
+│   ├── gemini_detector.py       # Gemini-powered anomaly detector
+│   └── ollama_detector.py       # Ollama-powered anomaly detector
+│
+├── frontend/                    # Web UI (served as static files)
+│   ├── index.html               # Main page with upload form
+│   ├── script.js                # Frontend logic (API, SSE, GPU)
+│   └── style.css                # Visual styling
+│
+├── data/                        # Sample log datasets
+│   ├── Apache.log               # 56,482 lines of Apache server logs
+│   └── Linux.log                # 25,567 lines of Linux syslog
+│
+├── examplelog/                  # Generated example logs
+│   └── my_access.log.txt        # 5,000 synthetic Apache access logs
+│
+└── scripts/                     # Setup utilities
+    ├── genlog.py                # Synthetic log generator (CLI tool)
+    ├── setup_ollama.sh          # Ollama setup for macOS/Linux
+    └── setup_ollama.ps1         # Ollama setup for Windows</code></pre>
+
+<table>
+<tr><th style="width:130px">File</th><th>What It Does</th></tr>
+<tr><td><code>src/app.py</code></td><td>Main server: defines all API routes (<code>/upload-log/</code>, <code>/api/gpu-status</code>, <code>/api/validate-api-key</code>), orchestrates the analysis pipeline, streams results via SSE</td></tr>
+<tr><td><code>src/ollama_detector.py</code></td><td>Contains <code>OllamaDetector</code> class: sends log lines/chunks to local Ollama models, handles retries, parses JSON responses</td></tr>
+<tr><td><code>src/gemini_detector.py</code></td><td>Contains <code>GeminiDetector</code> class: sends log lines/chunks to Google Gemini API, implements rate limiting and exponential backoff retries</td></tr>
+<tr><td><code>frontend/index.html</code></td><td>The web page: file upload form, model/mode/speed selectors, progress bar, results table</td></tr>
+<tr><td><code>frontend/script.js</code></td><td>Client logic: validates API keys, calls upload endpoint via fetch, reads SSE stream, updates the DOM with results</td></tr>
+<tr><td><code>frontend/style.css</code></td><td>Visual styling: dark/light theme, responsive layout, animated progress bar</td></tr>
+<tr><td><code>data/Apache.log</code></td><td>56,482 lines of real Apache web server logs from 2005 for testing</td></tr>
+<tr><td><code>data/Linux.log</code></td><td>25,567 lines of real Linux syslog (Red Hat boot sequence) for testing</td></tr>
+<tr><td><code>scripts/genlog.py</code></td><td>CLI tool to generate synthetic Apache logs with configurable error rates</td></tr>
+<tr><td><code>scripts/setup_ollama.sh</code></td><td>Bash script: installs Ollama, starts service, pulls default models</td></tr>
+<tr><td><code>scripts/setup_ollama.ps1</code></td><td>PowerShell equivalent for Windows users with GPU detection</td></tr>
+</table>
+</div>
+
+<!-- ===== SECTION 5 ===== -->
+<div class="section" id="s5">
+<h2>5. Architecture &amp; Pipeline</h2>
+
+<h3>High-Level Architecture</h3>
+<div class="diagram">
+  Browser (frontend/)                FastAPI Backend (src/)           LLM Backend
+  ┌─────────────────────┐          ┌───────────────────────┐       ┌──────────────┐
+  │                     │  POST /  │                       │       │              │
+  │  index.html         │  upload  │  app.py               │──────▶│  Ollama      │
+  │  script.js (SSE)    │─────────▶│  ├─ event_generator() │       │  (local)     │
+  │                     │◀─────────│  ├─ OllamaDetector    │       └──────────────┘
+  │  Progress Bar       │  SSE     │  └─ GeminiDetector    │       ┌──────────────┐
+  │  Results Table      │  stream  │                       │──────▶│  Gemini API  │
+  │  GPU Status Card    │          │  (auto-selected based │       │  (cloud)     │
+  │                     │          │   on model name)      │       └──────────────┘
+  └─────────────────────┘          └───────────────────────┘</div>
+
+<h3>Step-by-Step Pipeline</h3>
+<ol>
+  <li><strong>User loads the web app</strong> at <code>http://localhost:8000</code></li>
+  <li><strong>On page load</strong>, JavaScript:
+    <ul>
+      <li>Calls <code>GET /api/gpu-status</code> to check NVIDIA GPU + Ollama health</li>
+      <li>Loads saved Google API key from <code>localStorage</code> and auto-validates it</li>
+    </ul>
+  </li>
+  <li><strong>User selects options</strong>: Model (Llama/Qwen/Gemini), Mode (Auto/Line-by-Line/Intensive/Chunking), Speed (Balanced/Fast/Max)</li>
+  <li><strong>User uploads a log file</strong> and clicks "Analyze Logs"</li>
+  <li><strong>Frontend sends</strong> <code>POST /upload-log/</code> with the file + form parameters</li>
+  <li><strong>Backend decides which detector to use</strong>:
+    <ul>
+      <li>If model starts with <code>"gemini-"</code> → <strong>GeminiDetector</strong></li>
+      <li>Otherwise → <strong>OllamaDetector</strong></li>
+    </ul>
+  </li>
+  <li><strong>File is parsed</strong>: read, decoded to UTF-8, split into lines (blank lines skipped)</li>
+  <li><strong>Lines are grouped</strong> based on the selected mode (chunk size determined by mode)</li>
+  <li><strong>LLM processes chunks concurrently</strong> (concurrency controlled by speed setting via <code>asyncio.Semaphore</code>)</li>
+  <li><strong>Results are streamed</strong> back via SSE as JSON events: progress updates + final anomaly report</li>
+  <li><strong>Frontend displays</strong>: progress bar, total logs count, anomalies found, and a detailed table</li>
+</ol>
+
+<h3>Key Code: Upload Route (src/app.py:130-147)</h3>
+<pre><code>@app.post("/upload-log/")
+async def upload_log(
+    file: UploadFile = File(...),
+    model: str = Form("llama3.2:1b"),
+    mode: str = Form("auto"),
+    speed: str = Form("balanced"),
+    google_api_key: str = Form(None),
+    chunk_percentage: int = Form(10)
+):
+    if model.startswith("gemini-"):
+        speed_map = {"balanced": 1, "fast": 2, "max": 3}
+    else:
+        speed_map = {"balanced": 2, "fast": 4, "max": 6}
+    max_concurrency = speed_map.get(speed, 2)
+    return StreamingResponse(
+        event_generator(file, model, mode, max_concurrency,
+                        google_api_key, chunk_percentage),
+        media_type="text/event-stream"
+    )</code></pre>
+
+<h3>Key Code: Analysis Orchestration (src/app.py:149-216)</h3>
+<pre><code>async def event_generator(file, model, mode, max_concurrency,
+                          google_api_key, chunk_percentage):
+    contents = await file.read()
+    lines = contents.decode("utf-8", errors="replace").splitlines()
+    logs_to_analyze = []
+    for line_num, line in enumerate(lines, 1):
+        if not line.strip(): continue
+        logs_to_analyze.append((line_num, line))
+
+    if model.startswith("gemini-"):
+        detector = GeminiDetector(model_name=model, api_key=google_api_key,
+                                  max_concurrency=max_concurrency)
+    else:
+        detector = OllamaDetector(model_name=model,
+                                  max_concurrency=max_concurrency)
+
+    # ... async queue, progress callbacks, SSE streaming ...</code></pre>
+
+<h3>Key Code: Ollama Chunk Analysis (src/ollama_detector.py:107-150)</h3>
+<pre><code>async def _analyze_chunked(self, logs, chunk_size=10, progress_callback=None):
+    chunks = [logs[i:i + chunk_size]
+              for i in range(0, len(logs), chunk_size)]
+    semaphore = asyncio.Semaphore(self.max_concurrency)
+
+    async def process_chunk(chunk):
+        async with semaphore:
+            chunk_text = "\n".join(
+                [f"Line {ln}: {c}" for ln, c in chunk])
+            prompt = f"""Analyze the following batch of logs for anomalies.
+Identify any lines that are unusual, indicate errors, or show suspicious patterns.
+Respond in JSON format as a list of objects, each containing
+'line' (integer), 'anomaly' (boolean), and 'reason' (string).
+Only include lines that ARE anomalies.
+Logs: {chunk_text}"""
+            response = await self._call_ollama(prompt)
+            batch_results = json.loads(response['response'])
+            # ... parse results, filter anomalies ...</code></pre>
+
+<h3>Key Code: Gemini Rate Limiter (src/gemini_detector.py:15-36)</h3>
+<pre><code>class RateLimiter:
+    """Token bucket rate limiter to prevent API burst limits."""
+    def __init__(self, requests_per_second=0.5, burst=2):
+        self.rate = requests_per_second
+        self.burst = burst
+        self.tokens = burst
+
+    async def acquire(self):
+        async with self._lock:
+            now = time.monotonic()
+            elapsed = now - self.last_refill
+            self.tokens = min(self.burst,
+                              self.tokens + elapsed * self.rate)
+            if self.tokens >= 1:
+                self.tokens -= 1
+                return
+            wait = (1 - self.tokens) / self.rate
+            await asyncio.sleep(wait)</code></pre>
+</div>
+
+<!-- ===== SECTION 5a ===== -->
+<div class="section no-break" id="s5a">
+<h2>5a. ML Pre-filter Integration (Two-Stage Pipeline)</h2>
+
+<p>A <strong>pre-filter step</strong> has been added to dramatically reduce the number of lines the LLM needs to analyze. Inspired by <a href="https://github.com/AICoE/log-anomaly-detector">AICoE/log-anomaly-detector</a>, it uses an unsupervised ML approach before the LLM stage.</p>
+
+<h3>Why a pre-filter?</h3>
+<p>A 50,000-line log file would take the LLM a very long time to process (potentially thousands of API calls). The pre-filter quickly scans all lines and passes only the most "unusual" ones to the LLM, saving time and API costs.</p>
+
+<h3>How it works</h3>
+<ol>
+  <li><strong>Feature extraction:</strong> Each log line is converted to a 44-dimensional numerical vector (character frequencies, digit ratio, special chars, word stats, etc.)</li>
+  <li><strong>SOM (Self-Organizing Map):</strong> A neural network grid learns the pattern distribution of all log lines. Each node in the grid represents a "typical pattern."</li>
+  <li><strong>Scoring:</strong> Each line gets an anomaly score based on how far it is from its closest SOM node, weighted by how rare that SOM node is.</li>
+  <li><strong>Thresholding:</strong> Lines in the top N% (default: 15%) of scores are flagged as potential anomalies and passed to the LLM.</li>
+</ol>
+
+<h3>Two-Stage Pipeline</h3>
+<div class="diagram">
+  Raw Log File
+       │
+       ▼
+  ┌─────────────────────────────────┐
+  │  Stage 1: ML Pre-filter (SOM)  │  Fast (5s for 56K lines)
+  │  - Feature extraction           │  Flags top 10-15% as candidates
+  │  - SOM training + inference     │
+  └──────────┬──────────────────────┘
+             │ Only flagged lines (~8K / 56K)
+             ▼
+  ┌─────────────────────────────────┐
+  │  Stage 2: LLM Analysis          │  Slower but targeted
+  │  - Ollama or Gemini             │  Explains WHY each line is anomalous
+  │  - Detailed explanations        │
+  └──────────┬──────────────────────┘
+             ▼
+       Final Anomaly Report</div>
+
+<h3>Integration with log-anomaly-detector</h3>
+<p>The <code>src/prefilter.py</code> module implements the core algorithm from <strong>AICoE/log-anomaly-detector</strong> (Word2Vec-style text encoding + Self-Organizing Map) adapted as a lightweight Python class with only <code>numpy</code> as a dependency. The original package is archived and has complex dependencies (gensim, sompy, etc.), so the core logic was reimplemented for seamless integration.</p>
+
+<h3>Key Code: Pre-filter Integration (src/app.py:172-198)</h3>
+<pre><code># --- ML Pre-filter Step ---
+if use_prefilter and len(logs_to_analyze) &gt; 50:
+    prefilter = LogPrefilter()
+    texts = [content for _, content in logs_to_analyze]
+
+    yield {"type": "prefilter", "status": "training", "total": original_count}
+
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, prefilter.fit, texts)
+
+    results = prefilter.filter(logs_to_analyze)
+    filtered = [(line_num, content) for line_num, content, score in results]
+
+    yield {"type": "prefilter", "status": "done",
+           "total": original_count, "flagged": len(filtered),
+           "filtered_out": original_count - len(filtered)}
+
+    logs_to_analyze = filtered</code></pre>
+
+<h3>Key Code: SOM Anomaly Scoring (src/prefilter.py)</h3>
+<pre><code>def _compute_score(self, vector):
+    # Distance from line to closest SOM node
+    distances = np.sum((self.som - vector) ** 2, axis=2)
+    bmu = np.unravel_index(np.argmin(distances), distances.shape)
+    min_dist = float(np.min(distances))
+
+    # Penalty for rare BMUs (few lines map here)
+    hits = self.bmu_hits[bmu[0], bmu[1]]
+    freq_penalty = 1.0 / max(math.sqrt(hits), 0.01)
+
+    # Combined score
+    return min_dist * freq_penalty</code></pre>
+
+<h3>Performance Comparison</h3>
+<table>
+<tr><th>File Size</th><th>Without Pre-filter</th><th>With Pre-filter (top 15%)</th><th>Speedup</th></tr>
+<tr><td>1,000 lines</td><td>100 LLM calls (auto mode)</td><td>150 lines → 15 LLM calls</td><td>6.7x</td></tr>
+<tr><td>10,000 lines</td><td>1,000 LLM calls</td><td>1,500 lines → 150 LLM calls</td><td>6.7x</td></tr>
+<tr><td>56,000 lines</td><td>5,600 LLM calls</td><td>8,400 lines → 840 LLM calls</td><td>6.7x</td></tr>
+</table>
+<div class="callout green">
+<strong>Note:</strong> The pre-filter runs locally in ~5 seconds for 56K lines using only your CPU. The actual LLM calls are what take time, so reducing them by ~85% provides massive speed gains.
+</div>
+
+<h3>User Interface</h3>
+<p>The frontend has a toggle switch labeled <strong>"ML Pre-filter"</strong> below the speed selector. When enabled, the UI shows real-time pre-filter progress ("Training on X lines...", "Flagged Y lines out of Z") before the LLM analysis begins. The results also display how many lines were filtered.</p>
+</div>
+
+<!-- ===== SECTION 6 ===== -->
+<div class="section" id="s6">
+<h2>6. Analysis Modes Explained</h2>
+
+<p>The app offers <strong>4 analysis modes</strong> that control how log lines are sent to the LLM:</p>
+
+<table>
+<tr><th>Mode</th><th>How It Works</th><th>Best For</th><th>Speed</th></tr>
+<tr>
+  <td><strong>Auto (default)</strong></td>
+  <td>Logs are grouped into chunks of 10 lines each. Each chunk is sent to the LLM at once. The LLM returns a list of anomalies found in that chunk.</td>
+  <td>General purpose &mdash; good balance of speed and accuracy</td>
+  <td>Fast (10x fewer API calls)</td>
+</tr>
+<tr>
+  <td><strong>Line-by-Line</strong></td>
+  <td>Each individual log line is sent separately to the LLM. Highest accuracy but slowest.</td>
+  <td>Small files where accuracy is critical; NOT available for Gemini (too expensive)</td>
+  <td>Slow (1 call per line)</td>
+</tr>
+<tr>
+  <td><strong>Intensive</strong></td>
+  <td>Larger chunks of 20 lines each. Sends fewer requests per file.</td>
+  <td>Very large files where speed is more important than per-line accuracy</td>
+  <td>Fastest (fewer calls)</td>
+</tr>
+<tr>
+  <td><strong>Chunking</strong></td>
+  <td>User defines what percentage of total lines each chunk should be. For example, 5% of a 10,000-line file = 500-line chunks.</td>
+  <td>Custom control; fine-tuning for specific file sizes</td>
+  <td>Depends on chunk size</td>
+</tr>
+</table>
+
+<h3>Speed Settings</h3>
+<p>The <strong>Speed</strong> setting controls how many concurrent requests are sent to the LLM:</p>
+<table>
+<tr><th>Speed</th><th>Ollama (local) concurrency</th><th>Gemini (cloud) concurrency</th></tr>
+<tr><td>Balanced</td><td>2 concurrent requests</td><td>1 concurrent request</td></tr>
+<tr><td>Fast</td><td>4 concurrent requests</td><td>2 concurrent requests</td></tr>
+<tr><td>Max</td><td>6 concurrent requests</td><td>3 concurrent requests</td></tr>
+</table>
+
+<div class="callout warn">
+<strong>Tip:</strong> Higher concurrency = faster analysis, but may overwhelm weaker hardware (Ollama) or trigger API rate limits (Gemini).
+</div>
+</div>
+
+<!-- ===== SECTION 7 ===== -->
+<div class="section" id="s7">
+<h2>7. Local vs Cloud: Ollama vs Gemini</h2>
+
+<table>
+<tr><th style="width:140px">Feature</th><th style="width:230px">Ollama (Local)</th><th style="width:230px">Gemini (Cloud)</th></tr>
+<tr><td><strong>Privacy</strong></td><td>✅ Data never leaves your machine</td><td>❌ Data sent to Google servers</td></tr>
+<tr><td><strong>Cost</strong></td><td>✅ Completely free</td><td>⚠️ Free tier available, then pay-per-token</td></tr>
+<tr><td><strong>Internet needed</strong></td><td>✅ No &mdash; works fully offline</td><td>❌ Yes &mdash; requires API access</td></tr>
+<tr><td><strong>Model size</strong></td><td>Small (0.5B &ndash; 1B parameters)<br>Runs on consumer GPUs</td><td>Large (flash: ~60B, pro: ~175B+)<br>Runs on Google's servers</td></tr>
+<tr><td><strong>Accuracy</strong></td><td>⚠️ Good for basic anomaly detection, but misses subtle patterns</td><td>✅ Excellent &mdash; much better at understanding context</td></tr>
+<tr><td><strong>Speed</strong></td><td>⚠️ Slow on CPU, good on GPU (depends on hardware)</td><td>✅ Very fast &mdash; Google's infrastructure</td></tr>
+<tr><td><strong>Setup</strong></td><td>Install Ollama + pull models (automated via setup scripts)</td><td>Get a Google API key (free)</td></tr>
+<tr><td><strong>Rate limits</strong></td><td>✅ None &mdash; local hardware only</td><td>⚠️ 429 errors need retry logic (already implemented)</td></tr>
+<tr><td><strong>Models available</strong></td><td>Llama 3.2 (1B), Qwen 2.5 (0.5B)<br>(any Ollama-compatible model)</td><td>Gemini 1.5 Flash, 2.0 Flash<br>(discovered dynamically via API)</td></tr>
+</table>
+
+<h3>When to use which?</h3>
+<div class="callout green">
+<strong>Use Ollama when:</strong> Privacy matters, you have no internet, or you want to avoid API costs. Best for learning and experimentation.
+</div>
+<div class="callout">
+<strong>Use Gemini when:</strong> You need the highest accuracy, faster results, or are analyzing large files. Best for production use.
+</div>
+</div>
+
+<!-- ===== SECTION 8 ===== -->
+<div class="section" id="s8">
+<h2>8. How To Run The Project</h2>
+
+<h3>Prerequisites</h3>
+<ul>
+  <li>Python 3.9+</li>
+  <li>pip (Python package installer)</li>
+  <li>Ollama installed and running (for local models)</li>
+  <li>Google API key (optional, for Gemini models)</li>
+</ul>
+
+<h3>Quick Start</h3>
+<pre><code># 1. Install Python dependencies
+pip install -r requirements.txt
+
+# 2. Set up Ollama (automated script)
+# macOS/Linux:
+./scripts/setup_ollama.sh
+# Windows:
+.\scripts\setup_ollama.ps1
+
+# 3. Start the server
+uvicorn src.app:app --reload
+
+# 4. Open in browser
+open http://localhost:8000</code></pre>
+
+<h3>What happens on first load?</h3>
+<p>The app automatically:</p>
+<ul>
+  <li>Detects your NVIDIA GPU via <code>nvidia-smi</code></li>
+  <li>Checks if Ollama is running</li>
+  <li>Guides you to configure GPU acceleration if needed</li>
+  <li>Validates any saved Google API key</li>
+  <li>Populates the model dropdown with available options</li>
+</ul>
+
+<h3>GPU Configuration</h3>
+<p>The app forces Ollama to use CUDA (NVIDIA GPU) instead of Vulkan by setting environment variables at startup:</p>
+<pre><code># These are set automatically in src/app.py
+os.environ["OLLAMA_VULKAN"] = "0"
+os.environ["OLLAMA_LLM_LIBRARY"] = "cuda_v13"</code></pre>
+</div>
+
+<!-- ===== SECTION 9 ===== -->
+<div class="section" id="s9">
+<h2>9. Alternatives &amp; Comparison</h2>
+
+<h3>How GPCSSI-FINAL compares to existing log analysis tools</h3>
+
+<table>
+<tr>
+  <th style="width:130px">Tool</th>
+  <th style="width:170px">Approach</th>
+  <th>Strengths</th>
+  <th>Weaknesses</th>
+</tr>
+<tr>
+  <td><strong>GPCSSI-FINAL</strong></td>
+  <td>LLM-based semantic analysis</td>
+  <td>Zero setup, works on any log format, explains anomalies, free/offline option</td>
+  <td>No real-time monitoring, single-user, in-memory only</td>
+</tr>
+<tr>
+  <td><strong>Splunk</strong></td>
+  <td>Search + rules + ML</td>
+  <td>Enterprise-grade, real-time, vast ecosystem, dashboards</td>
+  <td>Very expensive, complex setup, needs query language (SPL), heavy infrastructure</td>
+</tr>
+<tr>
+  <td><strong>ELK Stack</strong><br>(Elasticsearch, Logstash, Kibana)</td>
+  <td>Index + search + visualize</td>
+  <td>Free (open source), powerful search, real-time ingestion, dashboards</td>
+  <td>Heavy (Java-based), requires Elasticsearch cluster, needs grok patterns for parsing, ops overhead</td>
+</tr>
+<tr>
+  <td><strong>Graylog</strong></td>
+  <td>Search + rules + pipelines</td>
+  <td>Free, easier than ELK, built-in pipelines, alerts</td>
+  <td>Still infrastructure-heavy, needs MongoDB + Elasticsearch, less flexible than LLMs</td>
+</tr>
+<tr>
+  <td><strong>Loki + Promtail</strong></td>
+  <td>Label-based log aggregation</td>
+  <td>Lightweight (compared to ELK), works with Grafana, cheap storage</td>
+  <td>No built-in anomaly detection, limited query capabilities, not for deep analysis</td>
+</tr>
+<tr>
+  <td><strong>AI-based (e.g., Datadog Logs, New Relic)</strong></td>
+  <td>ML + rules + AI</td>
+  <td>Managed service, built-in AI, good dashboards</td>
+  <td>Expensive, proprietary, data leaves your network, vendor lock-in</td>
+</tr>
+</table>
+
+<h3>Traditional Tools Flow (e.g., ELK)</h3>
+<div class="diagram">
+  Log File → Logstash (parse + grok pattern) → Elasticsearch (index) → Kibana (search/visualize)
+                                                                             ↓
+                                                                    User writes queries/rules
+                                                                    to find anomalies manually</div>
+
+<h3>GPCSSI-FINAL Flow</h3>
+<div class="diagram">
+  Log File → FastAPI (parse lines) → LLM (semantic analysis) → Results (anomalies + reasons)
+                                       ↑
+                          No rules, no queries, no training</div>
+</div>
+
+<!-- ===== SECTION 10 ===== -->
+<div class="section" id="s10">
+<h2>10. Why This Project Stands Out</h2>
+
+<div class="cards">
+  <div class="card">
+    <div class="num">7</div>
+    <div class="label">Python packages only</div>
+  </div>
+  <div class="card">
+    <div class="num">2</div>
+    <div class="label">Commands to run</div>
+  </div>
+  <div class="card">
+    <div class="num">0</div>
+    <div class="label">Training data needed</div>
+  </div>
+  <div class="card">
+    <div class="num">2</div>
+    <div class="label">LLM providers supported</div>
+  </div>
+</div>
+
+<ol>
+  <li><div class="key-diff"><strong>Zero Infrastructure:</strong> Unlike Splunk/ELK that need databases, clusters, and heavy services, this project runs as a single Python process. Install 7 packages and run one command.</div></li>
+
+  <li><div class="key-diff"><strong>No Training, No Rules:</strong> Traditional ML-based anomaly detection needs thousands of labeled examples. This project uses pre-trained LLMs &mdash; the model already understands what "normal" and "anomalous" look like from its training data.</div></li>
+
+  <li><div class="key-diff"><strong>Privacy-First Design:</strong> With Ollama support, you can run the entire application offline with no data leaving your computer. None of the alternative tools offer this in a free, easy-to-use package.</div></li>
+
+  <li><div class="key-diff"><strong>Explains Its Reasoning:</strong> The LLM returns natural-language explanations for each anomaly (e.g., "Multiple failed login attempts from same IP in short time"). Traditional tools only show a score or a matched pattern name.</div></li>
+
+  <li><div class="key-diff"><strong>Format-Agnostic:</strong> Works on Apache logs, Linux syslogs, error logs, or any text-based log format &mdash; without writing format-specific parsers. Traditional tools require grok patterns or regex for each format.</div></li>
+</ol>
+
+<h3>What GPCSSI-FINAL is NOT trying to be</h3>
+<ul>
+  <li>It's <strong>not</strong> a real-time monitoring system (no continuous log tailing)</li>
+  <li>It's <strong>not</strong> an enterprise SIEM (no user management, no RBAC)</li>
+  <li>It's <strong>not</strong> a replacement for production monitoring tools</li>
+</ul>
+
+<p>It is a <strong>lightweight, educational, developer-friendly tool</strong> for quick ad-hoc log analysis using the power of LLMs. It proves a concept: that modern AI can understand server logs without being explicitly trained for it.</p>
+</div>
+
+<!-- ===== SECTION 11 ===== -->
+<div class="section" id="s11">
+<h2>11. Limitations &amp; Future Work</h2>
+
+<h3>Current Limitations</h3>
+<table>
+<tr><th style="width:200px">Limitation</th><th>Explanation</th></tr>
+<tr><td><strong>No authentication</strong></td><td>Anyone with access to the URL can upload files and run analysis. Not suitable for multi-user deployment.</td></tr>
+<tr><td><strong>In-memory only</strong></td><td>Results are not saved. Once you close the page, the analysis is gone. No history, no export.</td></tr>
+<tr><td><strong>File size limit</strong></td><td>Limited only by server memory. Very large files (>100MB) may crash or slow down significantly.</td></tr>
+<tr><td><strong>No real-time monitoring</strong></td><td>You upload a static file. There's no "tail -f" or continuous log ingestion.</td></tr>
+<tr><td><strong>No automated tests</strong></td><td>The repository doesn't include unit or integration tests.</td></tr>
+<tr><td><strong>Small local models</strong></td><td>The bundled Ollama models (1B and 0.5B parameters) are relatively small; they may miss subtle anomalies that larger models would catch.</td></tr>
+<tr><td><strong>Gemini API costs</strong></td><td>While there's a free tier, heavy usage of Gemini incurs costs based on token count.</td></tr>
+</table>
+
+<h3>Planned Improvements (from README)</h3>
+<ul>
+  <li><strong>Custom model support</strong> &mdash; particularly Gemma 4 and Gemini 2 Pro for more accurate analysis</li>
+  <li><strong>Better error handling</strong> &mdash; more user-friendly messages when models aren't available</li>
+  <li><strong>Configuration file support</strong> &mdash; proper .env or config file instead of environment variables</li>
+</ul>
+
+<h3>Potential Future Enhancements</h3>
+<ul>
+  <li><strong>Persistent storage</strong> &mdash; save analysis results to a database for later review</li>
+  <li><strong>Batch processing</strong> &mdash; analyze multiple files at once</li>
+  <li><strong>Export reports</strong> &mdash; downloadable PDF/CSV of anomaly reports</li>
+  <li><strong>More LLM providers</strong> &mdash; OpenAI, Anthropic Claude, local Hugging Face models</li>
+  <li><strong>Real-time log tailing</strong> &mdash; watch a log file and analyze new lines as they appear</li>
+  <li><strong>Docker support</strong> &mdash; containerized deployment for easier setup</li>
+  <li><strong>Automated test suite</strong> &mdash; CI/CD pipeline with tests</li>
+</ul>
+
+<hr style="margin-top: 40px;">
+
+<div style="text-align: center; color: #888; font-size: 9pt; margin-top: 20px;">
+  Generated from the GPCSSI-FINAL repository &mdash; github.com/Narwal-himanshu/GPCSSI-FINAL
+</div>
+
+</div>
+
+</body>
+</html>

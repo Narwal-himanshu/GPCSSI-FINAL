@@ -1,0 +1,304 @@
+================================================================================
+           MATHEMATICAL FOUNDATION: ML CORE OF LOG ANOMALY DETECTOR
+================================================================================
+
+This document explains the mathematics behind the anomaly detection pre-filter,
+inspired by AICoE/log-anomaly-detector (Word2Vec + Self-Organizing Map).
+
+================================================================================
+1. FEATURE EXTRACTION: Log Line → Vector
+================================================================================
+
+Each raw log line is converted to a 44-dimensional numerical feature vector.
+
+Let a log line be a string L of length |L| characters.
+
+----------------------------------------------------------------------
+1.1 Statistical Features (8 dimensions)
+----------------------------------------------------------------------
+
+For each line, we compute:
+
+  f₁ = |L|                          (character count)
+  f₂ = |W|                          (word count, where W = L.split())
+  f₃ = (1/|W|) · Σ |w|             (mean word length, 0 if |W|=0)
+       w∈W
+
+  f₄ = digit_count / max(|L|, 1)    (digit ratio)
+  f₅ = upper_count / max(|L|, 1)    (uppercase ratio)
+  f₆ = special_count / max(|L|, 1)  (non-alphanumeric-non-space ratio)
+  f₇ = space_count / max(|L|, 1)    (space ratio)
+  f₈ = punct_count / max(|L|, 1)    (punctuation ratio: .:;!?)
+  f₉ = bracket_count / max(|L|, 1)  (bracket ratio: []{}()<>)
+  f₁₀ = slash_count / max(|L|, 1)   (slash ratio: /\-)
+  f₁₁ = hex_chars / max(|L|, 1)     (hex char ratio: a-f, A-F that are letters)
+
+----------------------------------------------------------------------
+1.2 Character Frequency Features (26 + 10 = 36 dimensions)
+----------------------------------------------------------------------
+
+Let L' be the lowercase version of L.
+
+For each letter c ∈ {a, b, c, ..., z}:
+
+  f₁₁₊ᵢ = count of c in L' / max(|L|, 1)
+
+For each digit d ∈ {0, 1, 2, ..., 9}:
+
+  f₃₇₊ⱼ = count of d in L / max(|L|, 1)
+
+----------------------------------------------------------------------
+1.3 Lexical Features (2 dimensions)
+----------------------------------------------------------------------
+
+  f₄₃ = |unique(W)| / max(|W|, 1)   (unique word ratio)
+  f₄₄ = count of '"' / max(|L|, 1)  (quote character ratio)
+
+----------------------------------------------------------------------
+1.4 Complete Feature Vector
+----------------------------------------------------------------------
+
+Each log line becomes a vector in ℝ⁴⁴:
+
+  x = [f₁, f₂, ..., f₄₄]ᵀ
+
+These 44 features capture the structural, lexical, and statistical
+fingerprint of a log line. Normal access logs cluster together, while
+error messages, security alerts, and unusual events fall far from
+the cluster in this 44-dimensional space.
+
+================================================================================
+2. STANDARDIZATION
+================================================================================
+
+Before SOM training, features are standardized to zero mean and unit variance.
+
+Let X be the N × 44 matrix of all feature vectors (N = number of log lines).
+
+  μⱼ = (1/N) · Σ X[i,j]            (mean of feature j)
+            i
+
+  σⱼ² = (1/N) · Σ (X[i,j] - μⱼ)²   (variance of feature j)
+               i
+
+  Z[i,j] = (X[i,j] - μⱼ) / max(σⱼ, 1)
+
+In vector form:
+  z = (x - μ) ⊘ σ                   (element-wise standardization)
+
+where μ ∈ ℝ⁴⁴ is the mean vector and σ ∈ ℝ⁴⁴ is the std. dev. vector.
+
+================================================================================
+3. SELF-ORGANIZING MAP (SOM)
+================================================================================
+
+The SOM is a grid of M × M nodes, where each node is a vector in ℝ⁴⁴.
+M = 12 by default (144 nodes total).
+
+----------------------------------------------------------------------
+3.1 Initialization
+----------------------------------------------------------------------
+
+Each node is initialized from a standard normal distribution:
+
+  wᵢⱼ ~ N(0, 1)                    for i,j ∈ {1, ..., M}
+
+where wᵢⱼ ∈ ℝ⁴⁴ is the weight vector of node at position (i, j).
+
+----------------------------------------------------------------------
+3.2 Training (Online / Sequential)
+----------------------------------------------------------------------
+
+Training runs for T iterations (default: min(5000, max(800, 15·N))).
+
+At each iteration t ∈ {1, ..., T}:
+
+  (a) PICK a random sample z[t] from the training data
+      (with replacement, cycling through the dataset)
+
+  (b) FIND the Best Matching Unit (BMU):
+
+      BMU(t) = argmin || z[t] - wᵢⱼ ||²
+                i,j
+
+      This is the node whose weight vector is most similar to the input.
+      The distance is Euclidean distance squared.
+
+      In code:
+        distances = Σ (wᵢⱼ - z)²    over all i, j
+                    d
+        BMU = argmin(distances)
+
+  (c) COMPUTE the neighborhood function:
+
+      The neighborhood radius decays exponentially over time:
+
+        σ(t) = σ₀ · exp(-t / (T/3))
+
+        where σ₀ = M/2 (initial radius, half the grid size)
+
+      The learning rate also decays exponentially:
+
+        η(t) = η₀ · exp(-t / (T/2))
+
+        where η₀ = 0.5 (initial learning rate)
+
+      The Gaussian neighborhood function for a node at position (i, j)
+      relative to the BMU at (bᵢ, bⱼ):
+
+        hᵢⱼ(t) = exp( -d(i,j,BMU)² / (2 · σ(t)²) )
+
+        where d(i,j,BMU) = √((i - bᵢ)² + (j - bⱼ)²) is the grid distance
+
+  (d) UPDATE all nodes:
+
+      wᵢⱼ(t+1) = wᵢⱼ(t) + η(t) · hᵢⱼ(t) · (z[t] - wᵢⱼ(t))
+
+      Intuition:
+      - The BMU is pulled most strongly toward the input
+      - Nearby nodes (small d) are pulled moderately
+      - Distant nodes (large d) are barely affected
+      - Early iterations have large σ (global organization)
+      - Late iterations have small σ (fine-tuning)
+
+  (e) TRACK BMU hits:
+
+      hits(bᵢ, bⱼ) += 1
+
+----------------------------------------------------------------------
+3.3 Training Summary
+----------------------------------------------------------------------
+
+After T iterations, the SOM has organized itself such that:
+- Similar log lines map to nearby or same nodes
+- Different log lines map to distant nodes
+- Frequent patterns get many hits on their BMUs
+- Rare patterns map to nodes with few or zero hits
+
+================================================================================
+4. ANOMALY SCORING
+================================================================================
+
+After training, each log line gets an anomaly score that combines
+quantization error with BMU rarity.
+
+----------------------------------------------------------------------
+4.1 Distance to BMU (Quantization Error)
+----------------------------------------------------------------------
+
+For a standardized feature vector z, the quantization error is:
+
+  q(z) = min || z - wᵢⱼ ||²
+          i,j
+
+This measures how "far" the log line is from the nearest learned pattern.
+Large q means the line doesn't match any common pattern well.
+
+----------------------------------------------------------------------
+4.2 BMU Rarity Penalty
+----------------------------------------------------------------------
+
+Let h(bᵢ, bⱼ) be the number of training samples that mapped to this BMU.
+
+  r(z) = 1 / √(h(BMU(z)) + ε)       where ε = 0.01
+
+This penalizes lines that map to rarely-used nodes. A line that maps to
+a node hit only once gets a high penalty (~1.0), while a line mapping to
+a node hit 100 times gets a low penalty (~0.1).
+
+----------------------------------------------------------------------
+4.3 Combined Score
+----------------------------------------------------------------------
+
+  s(z) = q(z) · r(z)
+
+The final anomaly score is the product of:
+- How far the line is from its closest learned pattern (q)
+- How rare that pattern is (r)
+
+This captures two intuitions:
+1. Lines that are far from ALL patterns are anomalous
+2. Lines that match a very rare pattern are also anomalous
+   (even if the match is close)
+
+----------------------------------------------------------------------
+4.4 Threshold (Percentile-Based)
+----------------------------------------------------------------------
+
+Instead of mean + k·σ (which is sensitive to outliers), we use a
+percentile-based threshold:
+
+  threshold = P₈₅({s(z₁), s(z₂), ..., s(zₙ)})
+
+  where P₈₅ is the 85th percentile (default)
+
+  A line is flagged as anomalous if:  s(z) > threshold
+
+This flags approximately 15% of lines as "candidates" for the LLM.
+The threshold is adaptive: it depends entirely on the distribution
+of scores in the current file.
+
+================================================================================
+5. WHY THIS WORKS FOR LOG ANALYSIS
+================================================================================
+
+----------------------------------------------------------------------
+5.1 Log Lines Have Strong Structure
+----------------------------------------------------------------------
+
+Server logs follow predictable formats:
+  - Apache access:    IP - - [DATE] "METHOD /path HTTP/1.x" STATUS SIZE
+  - Linux syslog:     DATE HOSTNAME SERVICE[PID]: MESSAGE
+  - Error messages:   ERROR: description at location
+
+These patterns create distinct clusters in the 44-dimensional feature space.
+
+----------------------------------------------------------------------
+5.2 Normal Patterns Are Dense, Anomalies Are Sparse
+----------------------------------------------------------------------
+
+In a typical Apache log file:
+  ~95% of lines are "GET /path HTTP/1.0" 200 <size>
+  ~5% are error messages, security alerts, restart notices
+
+The SOM learns the dense cluster of normal patterns.
+Anomalous lines fall far from this cluster (high q) or map to
+rare BMUs (high r), giving them high scores.
+
+----------------------------------------------------------------------
+5.3 Format Agnostic
+----------------------------------------------------------------------
+
+Because we use character-level features (not tokens or keywords),
+the method works on ANY text-based log format without modification:
+  - Apache logs, nginx logs
+  - Linux syslog, journald
+  - Application logs, Docker logs
+  - Custom formats
+
+================================================================================
+6. COMPARISON WITH AICoE/log-anomaly-detector ORIGINAL
+================================================================================
+
+Our implementation vs the original LAD:
+
+                    Original LAD                      This Implementation
+  ────────────   ──────────────────────────     ───────────────────────────
+  Text Encoding  Word2Vec (gensim)             Character-level features
+                 (word embeddings, 25+ dims)    (44 statistical features)
+
+  Model          SOMPY library                  Pure NumPy SOM
+                 (parallelized, sompy fork)     (12×12 grid, sequential)
+
+  Scoring        SOM distance + threshold       Distance × BMU rarity
+                 mean + k·σ threshold           percentile threshold
+
+  Dependencies   gensim, sompy, scipy, etc.     numpy only
+                 15+ packages                   1 package
+
+  Why changed?   Archived, Python 3.6+ only,    Works on any Python ≥3.9
+                 failed pip install              Zero external deps
+
+================================================================================
+END OF MATHEMATICAL FOUNDATION DOCUMENT
+================================================================================

@@ -13,8 +13,7 @@ logger = logging.getLogger("GeminiDetector")
 
 
 class RateLimiter:
-    """Token bucket rate limiter to prevent API burst rate limit hits."""
-    def __init__(self, requests_per_second: float = 0.5, burst: int = 2):
+    def __init__(self, requests_per_second: float = 0.25, burst: int = 1):
         self.rate = requests_per_second
         self.burst = burst
         self.tokens = burst
@@ -41,12 +40,48 @@ class GeminiDetector:
         self.model_name = model_name
         self.max_concurrency = max_concurrency
         self.client = genai.Client(api_key=api_key)
-        self.rate_limiter = RateLimiter(requests_per_second=0.5, burst=2)
+        self.rate_limiter = RateLimiter(requests_per_second=0.25, burst=1)
+        self._cooldown_until = 0.0
+        self._cooldown_lock = asyncio.Lock()
 
         logger.info(
             f"GeminiDetector initialized with model: {model_name}, "
             f"concurrency: {max_concurrency}"
         )
+
+    async def _call_gemini(self, prompt, timeout=60):
+        await self.rate_limiter.acquire()
+
+        async with self._cooldown_lock:
+            now = time.monotonic()
+            if now < self._cooldown_until:
+                wait = self._cooldown_until - now
+                logger.warning(f"Global cooldown active, waiting {wait:.1f}s")
+                await asyncio.sleep(wait)
+
+        try:
+            response = await asyncio.wait_for(
+                self.client.aio.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                    ),
+                ),
+                timeout=timeout
+            )
+            return response
+        except Exception as e:
+            error_str = str(e)
+            is_rate_limit = any(x in error_str for x in [
+                "429", "503", "Too Many Requests", "RESOURCE_EXHAUSTED",
+                "rate_limit", "quota", "RATE_LIMIT",
+            ])
+            if is_rate_limit:
+                async with self._cooldown_lock:
+                    self._cooldown_until = time.monotonic() + 10.0
+                    logger.warning(f"Rate limit hit. Setting global cooldown for 10s")
+            raise
 
     async def analyze_batch(self, logs, mode="auto", progress_callback=None, chunk_percentage=10, total_lines=0):
         if mode == "line-by-line":
@@ -61,6 +96,86 @@ class GeminiDetector:
         else:
             return await self._analyze_chunked(logs, chunk_size=10, progress_callback=progress_callback)
 
+    async def explain_batch(self, logs, mode="auto", progress_callback=None, chunk_percentage=10):
+        chunks = [logs[i:i + 10] for i in range(0, len(logs), 10)]
+        total_chunks = len(chunks)
+        semaphore = asyncio.Semaphore(self.max_concurrency)
+        completed = 0
+
+        async def explain_chunk(chunk):
+            nonlocal completed
+            async with semaphore:
+                chunk_text = "\n".join([f"Line {ln}: {c}" for ln, c in chunk])
+
+                prompt = f"""The following log lines have been flagged as anomalous by an ML anomaly detection system.
+For each line, explain why it is unusual or suspicious in a system log context.
+Respond in JSON as a list of objects, each with 'line' (integer) and 'reason' (string).
+
+Logs:
+{chunk_text}"""
+
+                chunk_results = []
+                max_retries = 8
+                base_delay = 5
+
+                for attempt in range(max_retries):
+                    try:
+                        response = await self._call_gemini(prompt)
+                        batch = json.loads(response.text)
+                        if isinstance(batch, dict) and "anomalies" in batch:
+                            batch = batch["anomalies"]
+                        elif isinstance(batch, dict):
+                            batch = [batch]
+                        if not isinstance(batch, list):
+                            raise ValueError(f"Expected list, got {type(batch).__name__}")
+
+                        for item in batch:
+                            line_num = item.get("line")
+                            content = next((c for ln, c in chunk if ln == line_num), "Unknown")
+                            chunk_results.append({
+                                "line": line_num,
+                                "content": content,
+                                "anomaly": True,
+                                "reason": item.get("reason", "Anomalous log line")
+                            })
+                        break
+                    except Exception as e:
+                        error_str = str(e)
+                        is_rate_limit = any(x in error_str for x in [
+                            "429", "503", "Too Many Requests", "RESOURCE_EXHAUSTED",
+                            "rate_limit", "quota", "RATE_LIMIT",
+                        ])
+                        if is_rate_limit and attempt < max_retries - 1:
+                            delay = min((base_delay ** attempt) + random.uniform(1, 5), 120.0)
+                            logger.warning(f"Rate limited (attempt {attempt+1}/{max_retries}). Retrying in {delay:.2f}s...")
+                            await asyncio.sleep(delay)
+                        elif attempt < max_retries - 1:
+                            delay = (2 ** attempt) + random.uniform(0.5, 2)
+                            logger.warning(f"Transient error (attempt {attempt+1}/{max_retries}): {e}. Retrying in {delay:.1f}s...")
+                            await asyncio.sleep(delay)
+                        else:
+                            logger.error(f"Max retries ({max_retries}) reached for chunk: {e}")
+                            for ln, c in chunk:
+                                chunk_results.append({
+                                    "line": ln, "content": c,
+                                    "anomaly": True,
+                                    "reason": f"Failed to generate explanation: {str(e)}"
+                                })
+                            break
+
+                completed += 1
+                if progress_callback:
+                    await progress_callback(completed, total_chunks)
+                return chunk_results
+
+        tasks = [explain_chunk(chunk) for chunk in chunks]
+        all_results = await asyncio.gather(*tasks)
+        results = []
+        for cr in all_results:
+            results.extend(cr)
+        results.sort(key=lambda r: r["line"])
+        return results
+
     async def _analyze_line_by_line(self, logs, progress_callback=None):
         total = len(logs)
         semaphore = asyncio.Semaphore(self.max_concurrency)
@@ -74,19 +189,11 @@ class GeminiDetector:
                 Log: {content}"""
 
                 max_retries = 8
-                base_delay = 4
+                base_delay = 5
 
                 for attempt in range(max_retries):
-                    await self.rate_limiter.acquire()
                     try:
-                        response = await asyncio.to_thread(
-                            self.client.models.generate_content,
-                            model=self.model_name,
-                            contents=prompt,
-                            config=types.GenerateContentConfig(
-                                response_mime_type="application/json",
-                            ),
-                        )
+                        response = await self._call_gemini(prompt)
                         data = json.loads(response.text)
                         result = {
                             "line": line_num,
@@ -97,30 +204,20 @@ class GeminiDetector:
                         break
                     except Exception as e:
                         error_str = str(e)
-                        if "429" in error_str or "503" in error_str or "Too Many Requests" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-                            if attempt < max_retries - 1:
-                                match = re.search(r'retry\s+(in|after)\s+([0-9.]+)', error_str, re.IGNORECASE)
-                                if match:
-                                    delay = float(match.group(2)) + random.uniform(0.5, 2.0)
-                                elif "Please retry in" in error_str:
-                                    match = re.search(r'Please retry in ([0-9.]+)s', error_str)
-                                    delay = float(match.group(1)) + random.uniform(0.5, 2.0)
-                                else:
-                                    delay = min((base_delay ** attempt) + random.uniform(1, 3), 60.0)
-
-                                logger.warning(f"Rate limited (attempt {attempt+1}/{max_retries}) on line {line_num}. Retrying in {delay:.2f}s...")
-                                await asyncio.sleep(delay)
-                            else:
-                                logger.error(f"Max retries ({max_retries}) reached for line {line_num}: {e}")
-                                result = {
-                                    "line": line_num,
-                                    "content": content,
-                                    "anomaly": False,
-                                    "reason": f"Analysis failed (rate limit exhausted): {str(e)}"
-                                }
-                                break
+                        is_rate_limit = any(x in error_str for x in [
+                            "429", "503", "Too Many Requests", "RESOURCE_EXHAUSTED",
+                            "rate_limit", "quota", "RATE_LIMIT",
+                        ])
+                        if is_rate_limit and attempt < max_retries - 1:
+                            delay = min((base_delay ** attempt) + random.uniform(1, 5), 120.0)
+                            logger.warning(f"Rate limited (attempt {attempt+1}/{max_retries}) on line {line_num}. Retrying in {delay:.2f}s...")
+                            await asyncio.sleep(delay)
+                        elif attempt < max_retries - 1:
+                            delay = (2 ** attempt) + random.uniform(0.5, 2)
+                            logger.warning(f"Transient error on line {line_num} (attempt {attempt+1}/{max_retries}): {e}")
+                            await asyncio.sleep(delay)
                         else:
-                            logger.error(f"Error analyzing line {line_num}: {e}")
+                            logger.error(f"Max retries ({max_retries}) reached for line {line_num}: {e}")
                             result = {
                                 "line": line_num,
                                 "content": content,
@@ -161,19 +258,11 @@ class GeminiDetector:
 
                 chunk_results = []
                 max_retries = 8
-                base_delay = 4
+                base_delay = 5
 
                 for attempt in range(max_retries):
-                    await self.rate_limiter.acquire()
                     try:
-                        response = await asyncio.to_thread(
-                            self.client.models.generate_content,
-                            model=self.model_name,
-                            contents=prompt,
-                            config=types.GenerateContentConfig(
-                                response_mime_type="application/json",
-                            ),
-                        )
+                        response = await self._call_gemini(prompt)
                         batch_results = json.loads(response.text)
                         if isinstance(batch_results, dict) and "anomalies" in batch_results:
                             batch_results = batch_results["anomalies"]
@@ -192,31 +281,27 @@ class GeminiDetector:
                         break
                     except Exception as e:
                         error_str = str(e)
-                        if "429" in error_str or "503" in error_str or "Too Many Requests" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-                            if attempt < max_retries - 1:
-                                match = re.search(r'retry\s+(in|after)\s+([0-9.]+)', error_str, re.IGNORECASE)
-                                if match:
-                                    delay = float(match.group(2)) + random.uniform(0.5, 2.0)
-                                elif "Please retry in" in error_str:
-                                    match = re.search(r'Please retry in ([0-9.]+)s', error_str)
-                                    delay = float(match.group(1)) + random.uniform(0.5, 2.0)
-                                else:
-                                    delay = min((base_delay ** attempt) + random.uniform(1, 3), 60.0)
-
-                                logger.warning(f"Rate limited (attempt {attempt+1}/{max_retries}) on chunk at line {chunk[0][0]}. Retrying in {delay:.2f}s...")
-                                await asyncio.sleep(delay)
-                            else:
-                                logger.error(f"Max retries ({max_retries}) reached for chunk at line {chunk[0][0]}: {e}")
-                                for ln, c in chunk:
-                                    chunk_results.append({
-                                        "line": ln,
-                                        "content": c,
-                                        "anomaly": False,
-                                        "reason": f"Analysis failed (rate limit exhausted): {str(e)}"
-                                    })
-                                break
+                        is_rate_limit = any(x in error_str for x in [
+                            "429", "503", "Too Many Requests", "RESOURCE_EXHAUSTED",
+                            "rate_limit", "quota", "RATE_LIMIT",
+                        ])
+                        if is_rate_limit and attempt < max_retries - 1:
+                            delay = min((base_delay ** attempt) + random.uniform(1, 5), 120.0)
+                            logger.warning(f"Rate limited (attempt {attempt+1}/{max_retries}) on chunk at line {chunk[0][0]}. Retrying in {delay:.2f}s...")
+                            await asyncio.sleep(delay)
+                        elif attempt < max_retries - 1:
+                            delay = (2 ** attempt) + random.uniform(0.5, 2)
+                            logger.warning(f"Transient error on chunk at line {chunk[0][0]} (attempt {attempt+1}/{max_retries}): {e}")
+                            await asyncio.sleep(delay)
                         else:
-                            logger.error(f"Error analyzing chunk starting at line {chunk[0][0]}: {e}")
+                            logger.error(f"Max retries ({max_retries}) reached for chunk at line {chunk[0][0]}: {e}")
+                            for ln, c in chunk:
+                                chunk_results.append({
+                                    "line": ln,
+                                    "content": c,
+                                    "anomaly": False,
+                                    "reason": f"Analysis failed: {str(e)}"
+                                })
                             break
 
                 completed += 1

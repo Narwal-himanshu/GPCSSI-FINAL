@@ -141,6 +141,9 @@ async function analyzeLogs() {
     formData.append("speed", speedSelect.value);
     formData.append("google_api_key", apiKeyInput.value);
 
+    const prefilterToggle = document.getElementById('prefilterToggle');
+    formData.append("use_prefilter", prefilterToggle.checked ? "true" : "false");
+
     const chunkPercentageInput = document.getElementById('chunkPercentageInput');
     if (chunkPercentageInput && modeSelect.value === 'chunking') {
         formData.append("chunk_percentage", chunkPercentageInput.value);
@@ -156,8 +159,15 @@ async function analyzeLogs() {
             <td colspan="4" style="text-align: center; font-style: italic;">No anomalies detected.</td>
         </tr>
     `;
+
+    // Reset both progress bars
+    document.getElementById('mlProgressContainer').classList.add('hidden');
+    document.getElementById('llmProgressContainer').classList.add('hidden');
+    document.getElementById('mlProgressBar').style.width = '0%';
+    document.getElementById('mlProgressBar').classList.remove('complete');
     document.getElementById('progressBar').style.width = '0%';
     document.getElementById('progressText').textContent = '0%';
+    document.getElementById('loadingStageText').textContent = 'Starting analysis...';
 
     try {
         const response = await fetch("/upload-log/", {
@@ -187,10 +197,61 @@ async function analyzeLogs() {
                     try {
                         const data = JSON.parse(trimmed.slice(6));
 
-                        if (data.type === 'progress') {
+                        if (data.type === 'prefilter_progress') {
+                            const mlBar = document.getElementById('mlProgressBar');
+                            const mlText = document.getElementById('mlProgressText');
+                            const pct = Math.round((data.current / data.total) * 100);
+                            mlBar.style.width = pct + '%';
+                            mlText.textContent = data.message || `ML Pre-filter: ${pct}%`;
+                        } else if (data.type === 'progress') {
+                            const llmContainer = document.getElementById('llmProgressContainer');
+                            if (llmContainer.classList.contains('hidden')) {
+                                document.getElementById('mlProgressContainer').classList.add('hidden');
+                                llmContainer.classList.remove('hidden');
+                                document.getElementById('loadingStageText').textContent = 'Stage 2/2: LLM Analysis';
+                            }
                             const percent = Math.round((data.current / data.total) * 100);
                             document.getElementById('progressBar').style.width = percent + '%';
                             document.getElementById('progressText').textContent = percent + '%';
+                        } else if (data.type === 'prefilter') {
+                            const mlContainer = document.getElementById('mlProgressContainer');
+                            const llmContainer = document.getElementById('llmProgressContainer');
+                            const prefilterInfo = document.getElementById('prefilterInfo');
+                            const stageText = document.getElementById('loadingStageText');
+
+                            if (data.status === 'training') {
+                                mlContainer.classList.remove('hidden');
+                                llmContainer.classList.add('hidden');
+                                stageText.textContent = 'Stage 1/2: ML Pre-filter';
+                                prefilterInfo.className = 'prefilter-info';
+                                prefilterInfo.textContent = `ML Pre-filter: Training on ${data.total} log lines...`;
+                                prefilterInfo.classList.remove('hidden');
+                            } else if (data.status === 'done') {
+                                // Mark ML bar as complete
+                                const mlBar = document.getElementById('mlProgressBar');
+                                mlBar.style.width = '100%';
+                                mlBar.classList.add('complete');
+                                document.getElementById('mlProgressText').textContent = 'ML Pre-filter complete ✓';
+
+                                prefilterInfo.innerHTML = `
+                                    ML Pre-filter flagged <span class="highlight">${data.flagged}</span> lines
+                                    out of <span class="highlight">${data.total}</span> total.
+                                    <span class="filtered-out">${data.filtered_out} lines filtered out.</span>
+                                    <span class="remaining">Proceeding with LLM analysis on ${data.flagged} lines.</span>
+                                `;
+
+                                // Transition to LLM bar
+                                stageText.textContent = 'Stage 2/2: LLM Analysis';
+                                setTimeout(() => {
+                                    mlContainer.classList.add('hidden');
+                                    llmContainer.classList.remove('hidden');
+                                }, 1500);
+                            } else if (data.status === 'skipped') {
+                                prefilterInfo.className = 'prefilter-info hidden';
+                                mlContainer.classList.add('hidden');
+                                llmContainer.classList.remove('hidden');
+                                stageText.textContent = 'Stage 2/2: LLM Analysis';
+                            }
                         } else if (data.type === 'result') {
                             document.getElementById('loading').classList.add('hidden');
                             displayResults(data);
@@ -216,6 +277,17 @@ function displayResults(data) {
 
     document.getElementById('totalLogs').textContent = data.total_lines;
     document.getElementById('anomaliesDetected').textContent = data.anomalies.length;
+
+    // Show prefilter stats if enabled
+    const prefilterInfo = document.getElementById('prefilterInfo');
+    if (data.prefilter_enabled) {
+        prefilterInfo.innerHTML = `
+            <strong>ML Pre-filter:</strong> Scanned ${data.total_lines} lines,
+            flagged <span class="highlight">${data.prefilter_flagged}</span> potential anomalies.
+            LLM analyzed <span class="remaining">${data.prefilter_remaining}</span> lines in detail.
+        `;
+        prefilterInfo.classList.remove('hidden');
+    }
 
     const tbody = document.getElementById('resultsTableBody');
     tbody.innerHTML = '';

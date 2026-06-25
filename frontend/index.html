@@ -55,6 +55,14 @@
                         <option value="max">Max Speed (GPU Max)</option>
                     </select>
                 </div>
+                <div class="control-group">
+                    <label class="toggle-label">
+                        <input type="checkbox" id="prefilterToggle" checked>
+                        <span class="toggle-switch"></span>
+                        ML Pre-filter
+                    </label>
+                    <p class="help-text">Pre-filter logs using ML (Word2Vec+SOM) before LLM analysis</p>
+                </div>
             </div>
             <input type="file" id="logFileInput" accept=".log, .txt, .csv">
             <button id="analyzeBtn" onclick="analyzeLogs()">Analyze Logs</button>
@@ -62,12 +70,22 @@
 
         <div id="loading" class="hidden">
             <div class="spinner"></div>
-            <p>Analyzing logs... this may take a moment.</p>
-            <div class="progress-container">
-                <div class="progress-bar" id="progressBar"></div>
+            <p id="loadingStageText">Starting analysis...</p>
+
+            <!-- ML Prefilter Progress (Stage 1) -->
+            <div id="mlProgressContainer" class="progress-container ml-progress-container hidden">
+                <div class="progress-bar ml-progress-bar" id="mlProgressBar"></div>
+                <p id="mlProgressText" class="progress-label">ML Pre-filter: initializing...</p>
             </div>
-            <p id="progressText">0%</p>
+
+            <!-- LLM Progress (Stage 2) -->
+            <div id="llmProgressContainer" class="progress-container hidden">
+                <div class="progress-bar" id="progressBar"></div>
+                <p id="progressText" class="progress-label">0%</p>
+            </div>
         </div>
+
+        <div id="prefilterInfo" class="prefilter-info hidden"></div>
 
         <div id="resultsSection" class="results-container hidden">
             <h2>Analysis Results</h2>
