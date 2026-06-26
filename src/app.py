@@ -118,14 +118,9 @@ app.add_middleware(
 @app.post("/api/validate-api-key")
 async def validate_api_key(google_api_key: str = Form(...)):
     try:
-        from google import genai
-        client = genai.Client(api_key=google_api_key)
-        # Try to list models as a simple validation
-        models = await asyncio.to_thread(client.models.list)
-        # Filter for gemini models
-        gemini_models = [m.name for m in models if m.name.startswith("models/gemini")]
-        return {"status": "success", "models": gemini_models}
-    except Exception as e:
+        from gemini_detector import validate_api_key as _validate
+        return await _validate(google_api_key)
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/upload-log/")
