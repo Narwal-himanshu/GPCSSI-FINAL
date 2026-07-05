@@ -303,7 +303,7 @@ class GeminiDetector:
             return await self._analyze_chunked(logs, chunk_size=10, progress_callback=progress_callback)
 
     async def explain_batch(self, logs, mode="auto", progress_callback=None, chunk_percentage=10):
-        chunks = [logs[i:i + 10] for i in range(0, len(logs), 10)]
+        chunks = [logs[i:i + 125] for i in range(0, len(logs), 125)]
         total_chunks = len(chunks)
         semaphore = asyncio.Semaphore(self.max_concurrency)
         completed = 0

@@ -63,7 +63,7 @@ class OllamaDetector:
             return await self._analyze_chunked(logs, chunk_size=chunk_size, progress_callback=progress_callback)
 
     async def explain_batch(self, logs, mode="auto", progress_callback=None, chunk_percentage=10):
-        chunks = [logs[i:i + 10] for i in range(0, len(logs), 10)]
+        chunks = [logs[i:i + 250] for i in range(0, len(logs), 250)]
         total_chunks = len(chunks)
         semaphore = asyncio.Semaphore(self.max_concurrency)
         completed = 0

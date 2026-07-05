@@ -52,6 +52,7 @@ function updateModelDropdown() {
     // Keep local models
     const localModels = [
         { value: "llama3.2:1b", text: "Llama 3.2 (1B)" },
+        { value: "gemma4:12b", text: "Gemma 4 (12B)" },
         { value: "qwen2.5:0.5b", text: "Qwen 2.5 (0.5B)" }
     ];
 
