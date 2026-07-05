@@ -114,11 +114,27 @@ function toggleChunkPercentage() {
     }
 }
 
+function updateMLOnlyToggle() {
+    const prefilterToggle = document.getElementById('prefilterToggle');
+    const mlOnlyToggle = document.getElementById('mlOnlyToggle');
+    if (prefilterToggle && mlOnlyToggle) {
+        mlOnlyToggle.disabled = !prefilterToggle.checked;
+        if (!prefilterToggle.checked) {
+            mlOnlyToggle.checked = false;
+        }
+    }
+}
+
 // Add event listener for model change
 document.addEventListener('DOMContentLoaded', () => {
     const modelSelect = document.getElementById('modelSelect');
     if (modelSelect) {
         modelSelect.addEventListener('change', handleModelChange);
+    }
+    const prefilterToggle = document.getElementById('prefilterToggle');
+    if (prefilterToggle) {
+        prefilterToggle.addEventListener('change', updateMLOnlyToggle);
+        updateMLOnlyToggle();
     }
 });
 
@@ -144,6 +160,9 @@ async function analyzeLogs() {
 
     const prefilterToggle = document.getElementById('prefilterToggle');
     formData.append("use_prefilter", prefilterToggle.checked ? "true" : "false");
+
+    const mlOnlyToggle = document.getElementById('mlOnlyToggle');
+    formData.append("ml_only", mlOnlyToggle.checked ? "true" : "false");
 
     const chunkPercentageInput = document.getElementById('chunkPercentageInput');
     if (chunkPercentageInput && modeSelect.value === 'chunking') {
@@ -234,19 +253,29 @@ async function analyzeLogs() {
                                 mlBar.classList.add('complete');
                                 document.getElementById('mlProgressText').textContent = 'ML Pre-filter complete ✓';
 
-                                prefilterInfo.innerHTML = `
-                                    ML Pre-filter flagged <span class="highlight">${data.flagged}</span> lines
-                                    out of <span class="highlight">${data.total}</span> total.
-                                    <span class="filtered-out">${data.filtered_out} lines filtered out.</span>
-                                    <span class="remaining">Proceeding with LLM analysis on ${data.flagged} lines.</span>
-                                `;
+                                if (data.ml_only) {
+                                    prefilterInfo.innerHTML = `
+                                        ML Pre-filter flagged <span class="highlight">${data.flagged}</span> lines
+                                        out of <span class="highlight">${data.total}</span> total.
+                                        <span class="filtered-out">${data.filtered_out} lines filtered out.</span>
+                                        <span class="remaining">LLM analysis skipped (ML Only mode).</span>
+                                    `;
+                                    stageText.textContent = 'ML Only — generating results...';
+                                } else {
+                                    prefilterInfo.innerHTML = `
+                                        ML Pre-filter flagged <span class="highlight">${data.flagged}</span> lines
+                                        out of <span class="highlight">${data.total}</span> total.
+                                        <span class="filtered-out">${data.filtered_out} lines filtered out.</span>
+                                        <span class="remaining">Proceeding with LLM analysis on ${data.flagged} lines.</span>
+                                    `;
 
-                                // Transition to LLM bar
-                                stageText.textContent = 'Stage 2/2: LLM Analysis';
-                                setTimeout(() => {
-                                    mlContainer.classList.add('hidden');
-                                    llmContainer.classList.remove('hidden');
-                                }, 1500);
+                                    // Transition to LLM bar
+                                    stageText.textContent = 'Stage 2/2: LLM Analysis';
+                                    setTimeout(() => {
+                                        mlContainer.classList.add('hidden');
+                                        llmContainer.classList.remove('hidden');
+                                    }, 1500);
+                                }
                             } else if (data.status === 'skipped') {
                                 prefilterInfo.className = 'prefilter-info hidden';
                                 mlContainer.classList.add('hidden');
@@ -279,14 +308,33 @@ function displayResults(data) {
     document.getElementById('totalLogs').textContent = data.total_lines;
     document.getElementById('anomaliesDetected').textContent = data.anomalies.length;
 
+    // Hide prediction column in ML Only mode
+    const mlOnly = data.ml_only || false;
+    const predHeader = document.getElementById('predictionHeader');
+    const noResultsCell = document.getElementById('noResultsCell');
+    if (predHeader) {
+        predHeader.style.display = mlOnly ? 'none' : '';
+    }
+    if (noResultsCell) {
+        noResultsCell.colSpan = mlOnly ? 3 : 4;
+    }
+
     // Show prefilter stats if enabled
     const prefilterInfo = document.getElementById('prefilterInfo');
     if (data.prefilter_enabled) {
-        prefilterInfo.innerHTML = `
-            <strong>ML Pre-filter:</strong> Scanned ${data.total_lines} lines,
-            flagged <span class="highlight">${data.prefilter_flagged}</span> potential anomalies.
-            LLM analyzed <span class="remaining">${data.prefilter_remaining}</span> lines in detail.
-        `;
+        if (mlOnly) {
+            prefilterInfo.innerHTML = `
+                <strong>ML Pre-filter:</strong> Scanned ${data.total_lines} lines,
+                flagged <span class="highlight">${data.prefilter_flagged}</span> anomalies.
+                LLM analysis skipped (ML Only mode).
+            `;
+        } else {
+            prefilterInfo.innerHTML = `
+                <strong>ML Pre-filter:</strong> Scanned ${data.total_lines} lines,
+                flagged <span class="highlight">${data.prefilter_flagged}</span> potential anomalies.
+                LLM analyzed <span class="remaining">${data.prefilter_remaining}</span> lines in detail.
+            `;
+        }
         prefilterInfo.classList.remove('hidden');
     }
 
@@ -296,7 +344,7 @@ function displayResults(data) {
     if (data.anomalies.length === 0) {
         tbody.innerHTML = `
             <tr id="noResultsRow">
-                <td colspan="4" style="text-align: center; font-style: italic;">No anomalies detected.</td>
+                <td id="noResultsCell" colspan="${mlOnly ? 3 : 4}" style="text-align: center; font-style: italic;">No anomalies detected.</td>
             </tr>
         `;
         return;
@@ -310,7 +358,7 @@ function displayResults(data) {
             <td>${anomaly.line}</td>
             <td><code>${anomaly.content}</code></td>
             <td>${anomaly.score}</td>
-            <td>${anomaly.prediction}</td>
+            <td${mlOnly ? ' style="display: none;"' : ''}>${anomaly.prediction}</td>
         `;
 
         tbody.appendChild(row);

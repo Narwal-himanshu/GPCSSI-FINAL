@@ -131,7 +131,8 @@ async def upload_log(
     speed: str = Form("balanced"),
     google_api_key: str = Form(None),
     chunk_percentage: int = Form(10),
-    use_prefilter: str = Form("false")
+    use_prefilter: str = Form("false"),
+    ml_only: str = Form("false")
 ):
     if model.startswith("gemini-"):
         speed_map = {"balanced": 1, "fast": 2, "max": 3}
@@ -139,12 +140,13 @@ async def upload_log(
         speed_map = {"balanced": 2, "fast": 4, "max": 6}
     max_concurrency = speed_map.get(speed, 2)
     prefilter_enabled = use_prefilter.lower() == "true"
+    ml_only_enabled = ml_only.lower() == "true"
     return StreamingResponse(
-        event_generator(file, model, mode, max_concurrency, google_api_key, chunk_percentage, prefilter_enabled),
+        event_generator(file, model, mode, max_concurrency, google_api_key, chunk_percentage, prefilter_enabled, ml_only_enabled),
         media_type="text/event-stream"
     )
 
-async def event_generator(file: UploadFile, model: str, mode: str, max_concurrency: int = 3, google_api_key: str = None, chunk_percentage: int = 10, use_prefilter: bool = False):
+async def event_generator(file: UploadFile, model: str, mode: str, max_concurrency: int = 3, google_api_key: str = None, chunk_percentage: int = 10, use_prefilter: bool = False, ml_only: bool = False):
     try:
         contents = await file.read()
     except Exception as e:
@@ -235,13 +237,41 @@ async def event_generator(file: UploadFile, model: str, mode: str, max_concurren
             'stage': '1/2',
             'total': original_count,
             'flagged': prefilter_flagged,
-            'filtered_out': prefilter_filtered_out
+            'filtered_out': prefilter_filtered_out,
+            'ml_only': ml_only
         })}\n\n"
 
         logs_to_analyze = [(ln, c) for ln, c, _ in results]
 
         if not logs_to_analyze:
-            yield f"data: {json.dumps({'type': 'result', 'total_lines': original_count, 'anomalies': [], 'prefilter_enabled': True, 'prefilter_flagged': 0, 'prefilter_remaining': 0, 'prefilter_filtered_out': original_count})}\n\n"
+            yield f"data: {json.dumps({'type': 'result', 'total_lines': original_count, 'anomalies': [], 'prefilter_enabled': True, 'ml_only': ml_only, 'prefilter_flagged': 0, 'prefilter_remaining': 0, 'prefilter_filtered_out': original_count})}\n\n"
+            return
+
+        if ml_only:
+            anomalies = []
+            for line_num, content in logs_to_analyze:
+                ms = ml_scores.get(line_num)
+                score_display = f"ML Score: {ms:.4f}" if ms is not None else "ML Detected"
+                anomalies.append({
+                    "line": line_num,
+                    "content": content,
+                    "score": score_display,
+                    "prediction": ""
+                })
+
+            prefilter_flagged_ml = len(logs_to_analyze)
+            prefilter_filtered_out_ml = original_count - len(logs_to_analyze)
+
+            yield f"data: {json.dumps({
+                'type': 'result',
+                'total_lines': len(lines),
+                'anomalies': anomalies,
+                'prefilter_enabled': True,
+                'ml_only': True,
+                'prefilter_flagged': prefilter_flagged_ml,
+                'prefilter_filtered_out': prefilter_filtered_out_ml,
+                'prefilter_remaining': 0
+            })}\n\n"
             return
     elif use_prefilter:
         print(f"[PIPELINE] STAGE 1: skipped (only {len(logs_to_analyze)} lines, need > 50)")
@@ -315,6 +345,7 @@ async def event_generator(file: UploadFile, model: str, mode: str, max_concurren
                 "total_lines": len(lines),
                 "anomalies": anomalies,
                 "prefilter_enabled": use_prefilter,
+                "ml_only": ml_only,
                 "prefilter_flagged": prefilter_flagged,
                 "prefilter_filtered_out": prefilter_filtered_out,
                 "prefilter_remaining": prefilter_remaining

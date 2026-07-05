@@ -64,6 +64,14 @@
                     </label>
                     <p class="help-text">Pre-filter logs using ML (Word2Vec+SOM) before LLM analysis</p>
                 </div>
+                <div class="control-group">
+                    <label class="toggle-label">
+                        <input type="checkbox" id="mlOnlyToggle" disabled>
+                        <span class="toggle-switch"></span>
+                        ML Only
+                    </label>
+                    <p class="help-text">Skip LLM, detect anomalies using ML pre-filter only</p>
+                </div>
             </div>
             <input type="file" id="logFileInput" accept=".log, .txt, .csv">
             <button id="analyzeBtn" onclick="analyzeLogs()">Analyze Logs</button>
@@ -109,12 +117,12 @@
                             <th>Line #</th>
                             <th>Log Content</th>
                             <th>Anomaly Score</th>
-                            <th>Prediction</th>
+                            <th id="predictionHeader">Prediction</th>
                         </tr>
                     </thead>
                     <tbody id="resultsTableBody">
                         <tr id="noResultsRow">
-                            <td colspan="4" style="text-align: center; font-style: italic;">No anomalies detected.</td>
+                            <td id="noResultsCell" colspan="4" style="text-align: center; font-style: italic;">No anomalies detected.</td>
                         </tr>
                     </tbody>
                 </table>
