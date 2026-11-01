@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Environment / secrets
+.env
+
+# Runtime output
+*.log.out
+uvicorn_output.log
+ollama.log
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
