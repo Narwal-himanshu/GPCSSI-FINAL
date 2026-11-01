@@ -377,3 +377,44 @@ tr.anomaly-row td {
     color: #28a745;
     font-weight: bold;
 }
+/* Error banner (replaces blocking alert() dialogs) */
+.error-banner {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    margin: 20px 0;
+    padding: 12px 16px;
+    border-radius: 6px;
+    background-color: #fdecea;
+    border: 1px solid var(--warning-color);
+    color: #8a1f17;
+}
+
+.error-banner.warning {
+    background-color: #fff8e1;
+    border-color: #f0b429;
+    color: #7a5a00;
+}
+
+.error-dismiss {
+    background: none;
+    border: none;
+    color: inherit;
+    font-size: 1.3em;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+    margin: 0;
+    width: auto;
+}
+
+.gpu-help {
+    margin-top: 8px;
+    font-size: 0.9em;
+}
+
+.error-dismiss:hover {
+    background: none;
+    opacity: 0.7;
+}

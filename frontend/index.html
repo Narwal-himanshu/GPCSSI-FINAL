@@ -21,15 +21,13 @@
                 <div class="control-group">
                     <label for="modelSelect">Model:</label>
                     <select id="modelSelect">
-                        <option value="llama3.2:1b">Llama 3.2 (1B) (Ollama)</option>
-                        <option value="gemma4:12b">Gemma 4 (12B) (Ollama)</option>
-                        <option value="qwen2.5:0.5b">Qwen 2.5 (0.5B) (Ollama) </option>
-                        <!-- Gemini models will be populated here after API key validation -->
+                        <!-- Populated from /api/models; Gemini models are added after API key validation -->
+                        <option value="llama3.2:1b">llama3.2:1b (Ollama)</option>
                     </select>
                 </div>
                 <div class="control-group">
                     <label for="modeSelect">Mode:</label>
-                    <select id="modeSelect" onchange="toggleChunkPercentage()">
+                    <select id="modeSelect">
                         <option value="auto">Auto (Balanced)</option>
                         <option value="line-by-line">Line-by-Line (Thorough)</option>
                         <option value="intensive">Intensive (Deep Context)</option>
@@ -44,7 +42,7 @@
                     <label for="apiKeyInput">Google API Key:</label>
                     <div class="api-key-container">
                         <input type="password" id="apiKeyInput" placeholder="Enter API Key (for Gemini)">
-                        <button id="validateKeyBtn" onclick="validateAndSaveKey()">Validate & Save</button>
+                        <button id="validateKeyBtn" type="button">Validate & Save</button>
                     </div>
                     <p id="apiKeyStatus" class="status-msg"></p>
                 </div>
@@ -62,7 +60,7 @@
                         <span class="toggle-switch"></span>
                         ML Pre-filter
                     </label>
-                    <p class="help-text">Pre-filter logs using ML (Word2Vec+SOM) before LLM analysis</p>
+                    <p class="help-text">Pre-filter logs with an unsupervised ML model (Self-Organizing Map) before LLM analysis</p>
                 </div>
                 <div class="control-group">
                     <label class="toggle-label">
@@ -74,10 +72,15 @@
                 </div>
             </div>
             <input type="file" id="logFileInput" accept=".log, .txt, .csv">
-            <button id="analyzeBtn" onclick="analyzeLogs()">Analyze Logs</button>
+            <button id="analyzeBtn" type="button">Analyze Logs</button>
         </div>
 
-        <div id="loading" class="hidden">
+        <div id="errorBanner" class="error-banner hidden" role="alert">
+            <span id="errorText"></span>
+            <button id="errorDismiss" type="button" class="error-dismiss" aria-label="Dismiss">&times;</button>
+        </div>
+
+        <div id="loading" class="hidden" aria-live="polite">
             <div class="spinner"></div>
             <p id="loadingStageText">Starting analysis...</p>
 

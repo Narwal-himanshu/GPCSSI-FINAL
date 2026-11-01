@@ -1,4 +1,42 @@
 let validatedGeminiModels = [];
+let ollamaModels = [{ name: "llama3.2:1b", installed: null }];
+let defaultModel = "llama3.2:1b";
+
+function showError(message, level = 'error') {
+    const banner = document.getElementById('errorBanner');
+    document.getElementById('errorText').textContent = message;
+    banner.className = level === 'warning' ? 'error-banner warning' : 'error-banner';
+}
+
+function hideError() {
+    document.getElementById('errorBanner').classList.add('hidden');
+}
+
+async function errorFromResponse(response) {
+    try {
+        const data = await response.json();
+        if (typeof data.detail === 'string') return data.detail;
+        if (Array.isArray(data.detail)) return data.detail.map(d => d.msg).join('; ');
+    } catch (e) {
+        // fall through to the status text
+    }
+    return `Server error: ${response.status} ${response.statusText}`;
+}
+
+async function loadModels() {
+    try {
+        const res = await fetch('/api/models');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (Array.isArray(data.models) && data.models.length) {
+            ollamaModels = data.models;
+        }
+        defaultModel = data.default_model || defaultModel;
+    } catch (e) {
+        console.warn('Could not load model list:', e);
+    }
+    updateModelDropdown(defaultModel);
+}
 
 async function validateAndSaveKey() {
     const apiKeyInput = document.getElementById('apiKeyInput');
@@ -25,17 +63,16 @@ async function validateAndSaveKey() {
             body: formData
         });
 
+        if (!response.ok) {
+            throw new Error(await errorFromResponse(response));
+        }
         const data = await response.json();
 
-        if (response.ok && data.status === "success") {
-            statusMsg.textContent = "API Key validated and saved!";
-            statusMsg.className = "status-msg success";
-            localStorage.setItem("google_api_key", apiKey);
-            validatedGeminiModels = data.models;
-            updateModelDropdown();
-        } else {
-            throw new Error(data.detail || "Validation failed");
-        }
+        statusMsg.textContent = "API Key validated and saved in this browser.";
+        statusMsg.className = "status-msg success";
+        localStorage.setItem("google_api_key", apiKey);
+        validatedGeminiModels = data.models;
+        updateModelDropdown();
     } catch (error) {
         statusMsg.textContent = "Error: " + error.message;
         statusMsg.className = "status-msg error";
@@ -47,30 +84,23 @@ async function validateAndSaveKey() {
     }
 }
 
-function updateModelDropdown() {
+function updateModelDropdown(preferred) {
     const modelSelect = document.getElementById('modelSelect');
-    // Keep local models
-    const localModels = [
-        { value: "llama3.2:1b", text: "Llama 3.2 (1B)" },
-        { value: "gemma4:12b", text: "Gemma 4 (12B)" },
-        { value: "qwen2.5:0.5b", text: "Qwen 2.5 (0.5B)" }
-    ];
-
-    const currentValue = modelSelect.value;
+    const currentValue = preferred || modelSelect.value;
     modelSelect.innerHTML = '';
 
-    localModels.forEach(m => {
+    ollamaModels.forEach(m => {
         const opt = document.createElement('option');
-        opt.value = m.value;
-        opt.textContent = m.text;
+        opt.value = m.name;
+        opt.textContent = m.installed === false
+            ? `${m.name} (Ollama, not pulled)`
+            : `${m.name} (Ollama)`;
         modelSelect.appendChild(opt);
     });
 
     validatedGeminiModels.forEach(modelName => {
         const opt = document.createElement('option');
-        // The API returns names like "models/gemini-1.5-flash"
-        // Our detector expects "gemini-1.5-flash" or the full name
-        // We'll keep the full name but show a friendly text
+        // The API returns names like "models/gemini-1.5-flash"; the backend expects "gemini-1.5-flash"
         opt.value = modelName.replace('models/', '');
         opt.textContent = "Gemini " + opt.value.replace('gemini-', '').toUpperCase();
         modelSelect.appendChild(opt);
@@ -125,18 +155,32 @@ function updateMLOnlyToggle() {
     }
 }
 
-// Add event listener for model change
-document.addEventListener('DOMContentLoaded', () => {
-    const modelSelect = document.getElementById('modelSelect');
-    if (modelSelect) {
-        modelSelect.addEventListener('change', handleModelChange);
-    }
-    const prefilterToggle = document.getElementById('prefilterToggle');
-    if (prefilterToggle) {
-        prefilterToggle.addEventListener('change', updateMLOnlyToggle);
-        updateMLOnlyToggle();
-    }
-});
+// Build "<span class=cls>text</span>" safely
+function span(cls, text) {
+    const el = document.createElement('span');
+    el.className = cls;
+    el.textContent = text;
+    return el;
+}
+
+// Replace an element's children with a mix of strings and nodes (no innerHTML)
+function setContent(el, parts) {
+    el.replaceChildren(...parts.map(p => typeof p === 'string' ? document.createTextNode(p) : p));
+}
+
+function setNoResultsRow(colSpan) {
+    const tbody = document.getElementById('resultsTableBody');
+    const row = document.createElement('tr');
+    row.id = 'noResultsRow';
+    const cell = document.createElement('td');
+    cell.id = 'noResultsCell';
+    cell.colSpan = colSpan;
+    cell.style.textAlign = 'center';
+    cell.style.fontStyle = 'italic';
+    cell.textContent = 'No anomalies detected.';
+    row.appendChild(cell);
+    tbody.replaceChildren(row);
+}
 
 async function analyzeLogs() {
     const fileInput = document.getElementById('logFileInput');
@@ -144,9 +188,11 @@ async function analyzeLogs() {
     const modeSelect = document.getElementById('modeSelect');
     const speedSelect = document.getElementById('speedSelect');
     const apiKeyInput = document.getElementById('apiKeyInput');
+    const analyzeBtn = document.getElementById('analyzeBtn');
 
+    hideError();
     if (fileInput.files.length === 0) {
-        alert("Please select a log file to analyze.");
+        showError("Please select a log file to analyze.");
         return;
     }
 
@@ -156,7 +202,9 @@ async function analyzeLogs() {
     formData.append("model", modelSelect.value);
     formData.append("mode", modeSelect.value);
     formData.append("speed", speedSelect.value);
-    formData.append("google_api_key", apiKeyInput.value);
+    if (modelSelect.value.startsWith('gemini-')) {
+        formData.append("google_api_key", apiKeyInput.value.trim());
+    }
 
     const prefilterToggle = document.getElementById('prefilterToggle');
     formData.append("use_prefilter", prefilterToggle.checked ? "true" : "false");
@@ -172,13 +220,11 @@ async function analyzeLogs() {
     }
 
     // Show loading state
+    analyzeBtn.disabled = true;
     document.getElementById('loading').classList.remove('hidden');
     document.getElementById('resultsSection').classList.add('hidden');
-    document.getElementById('resultsTableBody').innerHTML = `
-        <tr id="noResultsRow">
-            <td colspan="4" style="text-align: center; font-style: italic;">No anomalies detected.</td>
-        </tr>
-    `;
+    document.getElementById('prefilterInfo').classList.add('hidden');
+    setNoResultsRow(4);
 
     // Reset both progress bars
     document.getElementById('mlProgressContainer').classList.add('hidden');
@@ -189,6 +235,7 @@ async function analyzeLogs() {
     document.getElementById('progressText').textContent = '0%';
     document.getElementById('loadingStageText').textContent = 'Starting analysis...';
 
+    let gotResult = false;
     try {
         const response = await fetch("/upload-log/", {
             method: "POST",
@@ -196,7 +243,7 @@ async function analyzeLogs() {
         });
 
         if (!response.ok) {
-            throw new Error(`Server error: ${response.statusText}`);
+            throw new Error(await errorFromResponse(response));
         }
 
         const reader = response.body.getReader();
@@ -213,91 +260,98 @@ async function analyzeLogs() {
 
             for (const part of parts) {
                 const trimmed = part.trim();
-                if (trimmed.startsWith('data: ')) {
-                    try {
-                        const data = JSON.parse(trimmed.slice(6));
+                if (!trimmed.startsWith('data: ')) continue;
 
-                        if (data.type === 'prefilter_progress') {
-                            const mlBar = document.getElementById('mlProgressBar');
-                            const mlText = document.getElementById('mlProgressText');
-                            const pct = Math.round((data.current / data.total) * 100);
-                            mlBar.style.width = pct + '%';
-                            mlText.textContent = data.message || `ML Pre-filter: ${pct}%`;
-                        } else if (data.type === 'progress') {
-                            const llmContainer = document.getElementById('llmProgressContainer');
-                            if (llmContainer.classList.contains('hidden')) {
-                                document.getElementById('mlProgressContainer').classList.add('hidden');
-                                llmContainer.classList.remove('hidden');
-                                document.getElementById('loadingStageText').textContent = 'Stage 2/2: LLM Analysis';
-                            }
-                            const percent = Math.round((data.current / data.total) * 100);
-                            document.getElementById('progressBar').style.width = percent + '%';
-                            document.getElementById('progressText').textContent = percent + '%';
-                        } else if (data.type === 'prefilter') {
-                            const mlContainer = document.getElementById('mlProgressContainer');
-                            const llmContainer = document.getElementById('llmProgressContainer');
-                            const prefilterInfo = document.getElementById('prefilterInfo');
-                            const stageText = document.getElementById('loadingStageText');
+                let data;
+                try {
+                    data = JSON.parse(trimmed.slice(6));
+                } catch (e) {
+                    console.warn('Failed to parse SSE data:', e);
+                    continue;
+                }
 
-                            if (data.status === 'training') {
-                                mlContainer.classList.remove('hidden');
-                                llmContainer.classList.add('hidden');
-                                stageText.textContent = 'Stage 1/2: ML Pre-filter';
-                                prefilterInfo.className = 'prefilter-info';
-                                prefilterInfo.textContent = `ML Pre-filter: Training on ${data.total} log lines...`;
-                                prefilterInfo.classList.remove('hidden');
-                            } else if (data.status === 'done') {
-                                // Mark ML bar as complete
-                                const mlBar = document.getElementById('mlProgressBar');
-                                mlBar.style.width = '100%';
-                                mlBar.classList.add('complete');
-                                document.getElementById('mlProgressText').textContent = 'ML Pre-filter complete ✓';
-
-                                if (data.ml_only) {
-                                    prefilterInfo.innerHTML = `
-                                        ML Pre-filter flagged <span class="highlight">${data.flagged}</span> lines
-                                        out of <span class="highlight">${data.total}</span> total.
-                                        <span class="filtered-out">${data.filtered_out} lines filtered out.</span>
-                                        <span class="remaining">LLM analysis skipped (ML Only mode).</span>
-                                    `;
-                                    stageText.textContent = 'ML Only — generating results...';
-                                } else {
-                                    prefilterInfo.innerHTML = `
-                                        ML Pre-filter flagged <span class="highlight">${data.flagged}</span> lines
-                                        out of <span class="highlight">${data.total}</span> total.
-                                        <span class="filtered-out">${data.filtered_out} lines filtered out.</span>
-                                        <span class="remaining">Proceeding with LLM analysis on ${data.flagged} lines.</span>
-                                    `;
-
-                                    // Transition to LLM bar
-                                    stageText.textContent = 'Stage 2/2: LLM Analysis';
-                                    setTimeout(() => {
-                                        mlContainer.classList.add('hidden');
-                                        llmContainer.classList.remove('hidden');
-                                    }, 1500);
-                                }
-                            } else if (data.status === 'skipped') {
-                                prefilterInfo.className = 'prefilter-info hidden';
-                                mlContainer.classList.add('hidden');
-                                llmContainer.classList.remove('hidden');
-                                stageText.textContent = 'Stage 2/2: LLM Analysis';
-                            }
-                        } else if (data.type === 'result') {
-                            document.getElementById('loading').classList.add('hidden');
-                            displayResults(data);
-                        } else if (data.type === 'error') {
-                            document.getElementById('loading').classList.add('hidden');
-                            alert("Error: " + data.message);
-                        }
-                    } catch (e) {
-                        console.warn('Failed to parse SSE data:', e);
+                if (data.type === 'prefilter_progress') {
+                    const mlBar = document.getElementById('mlProgressBar');
+                    const mlText = document.getElementById('mlProgressText');
+                    const pct = Math.round((data.current / data.total) * 100);
+                    mlBar.style.width = pct + '%';
+                    mlText.textContent = data.message || `ML Pre-filter: ${pct}%`;
+                } else if (data.type === 'progress') {
+                    const llmContainer = document.getElementById('llmProgressContainer');
+                    if (llmContainer.classList.contains('hidden')) {
+                        document.getElementById('mlProgressContainer').classList.add('hidden');
+                        llmContainer.classList.remove('hidden');
+                        document.getElementById('loadingStageText').textContent = 'Stage 2/2: LLM Analysis';
                     }
+                    const percent = Math.round((data.current / data.total) * 100);
+                    document.getElementById('progressBar').style.width = percent + '%';
+                    document.getElementById('progressText').textContent = percent + '%';
+                } else if (data.type === 'prefilter') {
+                    handlePrefilterEvent(data);
+                } else if (data.type === 'result') {
+                    gotResult = true;
+                    document.getElementById('loading').classList.add('hidden');
+                    displayResults(data);
+                } else if (data.type === 'error') {
+                    gotResult = true;
+                    document.getElementById('loading').classList.add('hidden');
+                    showError(data.message);
                 }
             }
         }
+        if (!gotResult) {
+            throw new Error("The connection closed before the analysis finished.");
+        }
     } catch (error) {
         document.getElementById('loading').classList.add('hidden');
-        alert("Error analyzing log file: " + error.message);
+        showError("Error analyzing log file: " + error.message);
+    } finally {
+        analyzeBtn.disabled = false;
+    }
+}
+
+function handlePrefilterEvent(data) {
+    const mlContainer = document.getElementById('mlProgressContainer');
+    const llmContainer = document.getElementById('llmProgressContainer');
+    const prefilterInfo = document.getElementById('prefilterInfo');
+    const stageText = document.getElementById('loadingStageText');
+
+    if (data.status === 'training') {
+        mlContainer.classList.remove('hidden');
+        llmContainer.classList.add('hidden');
+        stageText.textContent = 'Stage 1/2: ML Pre-filter';
+        prefilterInfo.className = 'prefilter-info';
+        prefilterInfo.textContent = `ML Pre-filter: Training on ${data.total} log lines...`;
+    } else if (data.status === 'done') {
+        // Mark ML bar as complete
+        const mlBar = document.getElementById('mlProgressBar');
+        mlBar.style.width = '100%';
+        mlBar.classList.add('complete');
+        document.getElementById('mlProgressText').textContent = 'ML Pre-filter complete ✓';
+
+        const summary = [
+            'ML Pre-filter flagged ', span('highlight', String(data.flagged)),
+            ' lines out of ', span('highlight', String(data.total)), ' total. ',
+            span('filtered-out', `${data.filtered_out} lines filtered out.`), ' ',
+        ];
+        if (data.ml_only) {
+            setContent(prefilterInfo, [...summary, span('remaining', 'LLM analysis skipped (ML Only mode).')]);
+            stageText.textContent = 'ML Only — generating results...';
+        } else {
+            setContent(prefilterInfo, [...summary, span('remaining', `Proceeding with LLM analysis on ${data.flagged} lines.`)]);
+
+            // Transition to LLM bar
+            stageText.textContent = 'Stage 2/2: LLM Analysis';
+            setTimeout(() => {
+                mlContainer.classList.add('hidden');
+                llmContainer.classList.remove('hidden');
+            }, 1500);
+        }
+    } else if (data.status === 'skipped') {
+        prefilterInfo.className = 'prefilter-info hidden';
+        mlContainer.classList.add('hidden');
+        llmContainer.classList.remove('hidden');
+        stageText.textContent = 'Stage 2/2: LLM Analysis';
     }
 }
 
@@ -311,56 +365,64 @@ function displayResults(data) {
     // Hide prediction column in ML Only mode
     const mlOnly = data.ml_only || false;
     const predHeader = document.getElementById('predictionHeader');
-    const noResultsCell = document.getElementById('noResultsCell');
     if (predHeader) {
         predHeader.style.display = mlOnly ? 'none' : '';
     }
-    if (noResultsCell) {
-        noResultsCell.colSpan = mlOnly ? 3 : 4;
+
+    if (data.failed_lines) {
+        showError(`${data.failed_lines} line(s) could not be analysed by the LLM. Check the server logs for details.`, 'warning');
     }
 
     // Show prefilter stats if enabled
     const prefilterInfo = document.getElementById('prefilterInfo');
     if (data.prefilter_enabled) {
+        const head = document.createElement('strong');
+        head.textContent = 'ML Pre-filter:';
         if (mlOnly) {
-            prefilterInfo.innerHTML = `
-                <strong>ML Pre-filter:</strong> Scanned ${data.total_lines} lines,
-                flagged <span class="highlight">${data.prefilter_flagged}</span> anomalies.
-                LLM analysis skipped (ML Only mode).
-            `;
+            setContent(prefilterInfo, [
+                head, ` Scanned ${data.total_lines} lines, flagged `,
+                span('highlight', String(data.prefilter_flagged)),
+                ' anomalies. LLM analysis skipped (ML Only mode).',
+            ]);
         } else {
-            prefilterInfo.innerHTML = `
-                <strong>ML Pre-filter:</strong> Scanned ${data.total_lines} lines,
-                flagged <span class="highlight">${data.prefilter_flagged}</span> potential anomalies.
-                LLM analyzed <span class="remaining">${data.prefilter_remaining}</span> lines in detail.
-            `;
+            setContent(prefilterInfo, [
+                head, ` Scanned ${data.total_lines} lines, flagged `,
+                span('highlight', String(data.prefilter_flagged)),
+                ' potential anomalies. LLM analyzed ',
+                span('remaining', String(data.prefilter_remaining)), ' lines in detail.',
+            ]);
         }
-        prefilterInfo.classList.remove('hidden');
+        prefilterInfo.className = 'prefilter-info';
     }
 
     const tbody = document.getElementById('resultsTableBody');
-    tbody.innerHTML = '';
 
     if (data.anomalies.length === 0) {
-        tbody.innerHTML = `
-            <tr id="noResultsRow">
-                <td id="noResultsCell" colspan="${mlOnly ? 3 : 4}" style="text-align: center; font-style: italic;">No anomalies detected.</td>
-            </tr>
-        `;
+        setNoResultsRow(mlOnly ? 3 : 4);
         return;
     }
 
+    tbody.replaceChildren();
     data.anomalies.forEach(anomaly => {
         const row = document.createElement('tr');
         row.className = 'anomaly-row';
 
-        row.innerHTML = `
-            <td>${anomaly.line}</td>
-            <td><code>${anomaly.content}</code></td>
-            <td>${anomaly.score}</td>
-            <td${mlOnly ? ' style="display: none;"' : ''}>${anomaly.prediction}</td>
-        `;
+        const lineCell = document.createElement('td');
+        lineCell.textContent = anomaly.line;
 
+        const contentCell = document.createElement('td');
+        const code = document.createElement('code');
+        code.textContent = anomaly.content;
+        contentCell.appendChild(code);
+
+        const scoreCell = document.createElement('td');
+        scoreCell.textContent = anomaly.score;
+
+        const predictionCell = document.createElement('td');
+        predictionCell.textContent = anomaly.prediction;
+        if (mlOnly) predictionCell.style.display = 'none';
+
+        row.append(lineCell, contentCell, scoreCell, predictionCell);
         tbody.appendChild(row);
     });
 }
@@ -368,7 +430,6 @@ function displayResults(data) {
 // GPU Status Check
 async function checkGpuStatus() {
     const el = document.getElementById('gpuStatus');
-    const indicator = el.querySelector('.gpu-indicator');
     const text = el.querySelector('.gpu-text');
 
     try {
@@ -379,33 +440,24 @@ async function checkGpuStatus() {
 
         if (data.gpu_active) {
             el.classList.add('gpu-ok');
-            text.textContent = `GPU active: ${data.nvidia_gpu?.name || 'GPU'} (${data.nvidia_gpu?.vram || '?'} VRAM)`;
-        } else if (data.nvidia_gpu) {
+            const vram = data.nvidia_gpu?.vram ? ` (${data.nvidia_gpu.vram} VRAM)` : '';
+            text.textContent = `GPU active: ${data.nvidia_gpu?.name || 'GPU'}${vram}`;
+        } else if (data.nvidia_gpu && data.loaded_models?.length) {
             el.classList.add('gpu-warn');
-            text.innerHTML = `GPU detected (${data.nvidia_gpu.name}) but Ollama is not using it. `;
-            const action = document.createElement('span');
-            action.className = 'gpu-action';
-            action.textContent = 'How to fix';
-            action.onclick = () => {
-                alert(
-                    'To force Ollama to use your NVIDIA GPU:\n\n' +
-                    '1. Right-click the Ollama icon in the system tray\n' +
-                    '   and select "Quit" to stop Ollama completely.\n\n' +
-                    '2. Start the app with:\n' +
-                    '   uvicorn src.app:app --reload\n\n' +
-                    '   The app sets OLLAMA_VULKAN=0 and\n' +
-                    '   OLLAMA_LLM_LIBRARY=cuda_v13 automatically\n' +
-                    '   (project-level only, not system-wide).\n\n' +
-                    '3. Start Ollama from the Start Menu.\n\n' +
-                    '4. Refresh this page.\n\n' +
-                    'The env vars are set inside the Python app so\n' +
-                    'they only affect this project.'
+            text.textContent = `GPU detected (${data.nvidia_gpu.name}) but Ollama is not using it. `;
+            const action = span('gpu-action', 'How to fix');
+            action.addEventListener('click', () => {
+                showError(
+                    'To make Ollama use your NVIDIA GPU: quit Ollama (system tray → Quit), set the GPU ' +
+                    'environment variables for the Ollama server (e.g. OLLAMA_VULKAN=0 on hybrid-GPU ' +
+                    'laptops), start Ollama again, then refresh this page. See docs/troubleshooting.md.',
+                    'warning'
                 );
-            };
+            });
             text.appendChild(action);
-        } else if (!data.nvidia_gpu) {
-            el.classList.add('gpu-err');
-            text.textContent = 'No NVIDIA GPU detected. Running on CPU.';
+        } else if (data.ollama_reachable) {
+            el.classList.add(data.nvidia_gpu ? 'gpu-warn' : 'gpu-err');
+            text.textContent = data.message;
         } else {
             el.classList.add('gpu-err');
             text.textContent = data.message || 'GPU status unknown.';
@@ -418,7 +470,18 @@ async function checkGpuStatus() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('modelSelect').addEventListener('change', handleModelChange);
+    document.getElementById('modeSelect').addEventListener('change', toggleChunkPercentage);
+    document.getElementById('validateKeyBtn').addEventListener('click', validateAndSaveKey);
+    document.getElementById('analyzeBtn').addEventListener('click', analyzeLogs);
+    document.getElementById('errorDismiss').addEventListener('click', hideError);
+
+    const prefilterToggle = document.getElementById('prefilterToggle');
+    prefilterToggle.addEventListener('change', updateMLOnlyToggle);
+    updateMLOnlyToggle();
+
     checkGpuStatus();
+    loadModels();
 
     // Load saved API key
     const savedKey = localStorage.getItem("google_api_key");
