@@ -18,7 +18,6 @@ import argparse
 import random
 from datetime import datetime, timedelta
 
-
 # --------------------------------------------------------------------------- #
 # Sample data pools used to build realistic-looking log lines
 # --------------------------------------------------------------------------- #

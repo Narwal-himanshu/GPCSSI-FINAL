@@ -1,6 +1,7 @@
-import numpy as np
-import math
 import logging
+import math
+
+import numpy as np
 
 logger = logging.getLogger("Prefilter")
 
@@ -19,10 +20,12 @@ class LogPrefilter:
     - Rarity of the BMU (how few training lines map to that node)
 
     Uses percentile-based thresholding to flag the most unusual lines.
+
+    Original approach: https://github.com/AICoE/log-anomaly-detector (GPL-3.0).
     """
 
     def __init__(self, map_size=12, flag_percentile=85, learning_rate=0.5,
-                 sigma=None, n_iterations=None):
+                 sigma=None, n_iterations=None, seed=None):
         self.map_size = map_size
         self.flag_percentile = flag_percentile
         self.learning_rate = learning_rate
@@ -34,6 +37,7 @@ class LogPrefilter:
         self.threshold = None
         self.mean = None
         self.std = None
+        self.rng = np.random.default_rng(seed)
 
     def _extract_features(self, text):
         features = []
@@ -79,7 +83,7 @@ class LogPrefilter:
         return np.array([self._extract_features(t) for t in texts])
 
     def _initialize_som(self, input_dim):
-        self.som = np.random.randn(self.map_size, self.map_size, input_dim).astype(np.float32)
+        self.som = self.rng.standard_normal((self.map_size, self.map_size, input_dim)).astype(np.float32)
         self.input_dim = input_dim
         self.bmu_hits = np.zeros((self.map_size, self.map_size), dtype=np.int32)
 
@@ -139,7 +143,7 @@ class LogPrefilter:
         if progress_callback:
             progress_callback(90, 100, "Scoring lines")
 
-        combined = np.array([self._compute_score(v) for v in vectors])
+        combined = self._compute_scores(vectors)
         self.threshold = float(np.percentile(combined, self.flag_percentile))
 
         if progress_callback:
@@ -148,6 +152,23 @@ class LogPrefilter:
         n_anomalies = int(np.sum(combined > self.threshold))
         logger.info(f"Prefilter trained: flagged {n_anomalies}/{n_samples} "
                      f"(top {100 - self.flag_percentile}%, threshold={self.threshold:.4f})")
+
+    def _compute_scores(self, vectors, batch_size=4096):
+        """Score many normalised vectors at once (see _compute_score)."""
+        nodes = self.som.reshape(-1, self.input_dim)
+        node_sq = np.sum(nodes ** 2, axis=1)
+        hits = self.bmu_hits.reshape(-1)
+        scores = np.empty(len(vectors), dtype=np.float64)
+        for start in range(0, len(vectors), batch_size):
+            batch = vectors[start:start + batch_size]
+            # ||x - w||^2 = ||x||^2 - 2 x.w + ||w||^2
+            dists = np.sum(batch ** 2, axis=1)[:, None] - 2.0 * batch @ nodes.T + node_sq[None, :]
+            dists = np.maximum(dists, 0.0)
+            bmu = np.argmin(dists, axis=1)
+            min_dist = dists[np.arange(len(batch)), bmu]
+            freq_penalty = 1.0 / np.maximum(np.sqrt(hits[bmu]), 0.01)
+            scores[start:start + len(batch)] = min_dist * freq_penalty
+        return scores
 
     def _compute_score(self, vector):
         distances = np.sum((self.som - vector) ** 2, axis=2)
@@ -161,16 +182,19 @@ class LogPrefilter:
     def filter(self, logs):
         if self.som is None:
             raise RuntimeError("Prefilter not fitted. Call fit() first.")
+        if not logs:
+            return []
 
         texts = [content for _, content in logs]
         vectors = self._extract_features_batch(texts)
         vectors = (vectors - self.mean) / self.std
+        scores = self._compute_scores(vectors)
 
-        anomalous = []
-        for i, (line_num, content) in enumerate(logs):
-            score = self._compute_score(vectors[i])
-            if score > self.threshold:
-                anomalous.append((line_num, content, float(score)))
+        anomalous = [
+            (line_num, content, float(score))
+            for (line_num, content), score in zip(logs, scores, strict=True)
+            if score > self.threshold
+        ]
 
         logger.info(f"Prefilter flagged {len(anomalous)}/{len(logs)} lines as anomalous")
         return anomalous

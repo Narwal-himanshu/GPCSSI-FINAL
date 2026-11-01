@@ -1,32 +1,32 @@
 import asyncio
 import hashlib
-import json
 import logging
-import os
 import random
 import time
 from dataclasses import dataclass, field
-from typing import Optional
 
 from google import genai
 from google.genai import errors as gemini_errors
 from google.genai import types
+
+from .config import get_settings
+from .llm_utils import anomalies_for_chunk, explanations_for_chunk, failed_chunk, parse_llm_list
 
 logger = logging.getLogger("GeminiDetector")
 
 # ---------------------------------------------------------------------------
 # Env‑var defaults
 # ---------------------------------------------------------------------------
-_ENV_RPS = float(os.environ.get("GEMINI_MAX_RPM", "15")) / 60.0
-_ENV_BURST = int(os.environ.get("GEMINI_BURST", "1"))
-_ENV_COOLDOWN = float(os.environ.get("GEMINI_COOLDOWN_SECONDS", "15"))
-_ENV_MAX_RETRIES = int(os.environ.get("GEMINI_MAX_RETRIES", "5"))
-_ENV_BASE_DELAY = float(os.environ.get("GEMINI_BASE_DELAY", "2.0"))
-_ENV_MAX_DELAY = float(os.environ.get("GEMINI_MAX_DELAY", "30.0"))
-_ENV_CACHE_TTL = int(os.environ.get("GEMINI_CACHE_TTL", "300"))
-_ENV_TIMEOUT = float(os.environ.get("GEMINI_TIMEOUT", "60"))
-_ENV_CONCURRENCY = int(os.environ.get("GEMINI_MAX_CONCURRENCY", "2"))
-_ENV_FALLBACK_MODEL = os.environ.get("OLLAMA_FALLBACK_MODEL", "llama3.2:1b")
+_settings = get_settings()
+_ENV_RPS = _settings.gemini_max_rpm / 60.0
+_ENV_BURST = _settings.gemini_burst
+_ENV_COOLDOWN = _settings.gemini_cooldown_seconds
+_ENV_MAX_RETRIES = _settings.gemini_max_retries
+_ENV_BASE_DELAY = _settings.gemini_base_delay
+_ENV_MAX_DELAY = _settings.gemini_max_delay
+_ENV_CACHE_TTL = _settings.gemini_cache_ttl
+_ENV_TIMEOUT = _settings.gemini_timeout
+_ENV_CONCURRENCY = _settings.gemini_max_concurrency
 
 
 # ---------------------------------------------------------------------------
@@ -99,13 +99,13 @@ class _SharedState:
 _shared_states: dict[str, _SharedState] = {}
 
 
-def _key_for(api_key: Optional[str]) -> str:
+def _key_for(api_key: str | None) -> str:
     if not api_key:
         return "__default__"
     return hashlib.sha256(api_key.encode()).hexdigest()
 
 
-def _get_shared(api_key: Optional[str], rl_config: RateLimitConfig) -> _SharedState:
+def _get_shared(api_key: str | None, rl_config: RateLimitConfig) -> _SharedState:
     k = _key_for(api_key)
     if k not in _shared_states:
         _shared_states[k] = _SharedState(rate_limiter=RateLimiter(rl_config))
@@ -123,7 +123,7 @@ def _cache_key(model: str, prompt: str) -> str:
     return hashlib.sha256(f"{model}:::{prompt}".encode()).hexdigest()
 
 
-def _cache_get(key: str) -> Optional[str]:
+def _cache_get(key: str) -> str | None:
     entry = _prompt_cache.get(key)
     if entry is None:
         return None
@@ -150,11 +150,11 @@ class GeminiDetector:
     def __init__(
         self,
         model_name: str = "gemini-2.0-flash",
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         max_concurrency: int = _ENV_CONCURRENCY,
         timeout: float = _ENV_TIMEOUT,
-        rate_limit_config: Optional[RateLimitConfig] = None,
-        retry_config: Optional[RetryConfig] = None,
+        rate_limit_config: RateLimitConfig | None = None,
+        retry_config: RetryConfig | None = None,
     ):
         self.model_name = model_name
         self.max_concurrency = max_concurrency
@@ -216,7 +216,7 @@ class GeminiDetector:
         if cached is not None:
             return cached
 
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
 
         for attempt in range(self._retry_config.max_retries):
             try:
@@ -303,155 +303,93 @@ class GeminiDetector:
             return await self._analyze_chunked(logs, chunk_size=10, progress_callback=progress_callback)
 
     async def explain_batch(self, logs, mode="auto", progress_callback=None, chunk_percentage=10):
-        chunks = [logs[i:i + 125] for i in range(0, len(logs), 125)]
-        total_chunks = len(chunks)
-        semaphore = asyncio.Semaphore(self.max_concurrency)
-        completed = 0
-
         async def explain_chunk(chunk):
-            nonlocal completed
-            async with semaphore:
-                chunk_text = "\n".join([f"Line {ln}: {c}" for ln, c in chunk])
-                prompt = (
-                    "The following log lines have been flagged as anomalous by an ML anomaly detection system.\n"
-                    "For each line, explain why it is unusual or suspicious in a system log context.\n"
-                    "Respond in JSON as a list of objects, each with 'line' (integer) and 'reason' (string).\n"
-                    "\n"
-                    f"Logs:\n{chunk_text}"
+            chunk_text = "\n".join(f"Line {ln}: {c}" for ln, c in chunk)
+            prompt = (
+                "The following log lines have been flagged as anomalous by an ML anomaly detection system.\n"
+                "For each line, explain why it is unusual or suspicious in a system log context.\n"
+                "Respond in JSON as a list of objects, each with 'line' (integer) and 'reason' (string).\n"
+                "\n"
+                f"Logs:\n{chunk_text}"
+            )
+            try:
+                text = await self._call_with_retry(
+                    prompt, context=f"explain lines {chunk[0][0]}-{chunk[-1][0]}",
                 )
-                chunk_results = []
-                try:
-                    text = await self._call_with_retry(
-                        prompt, context=f"explain lines {chunk[0][0]}-{chunk[-1][0]}",
-                    )
-                    batch = json.loads(text)
-                    if isinstance(batch, dict) and "anomalies" in batch:
-                        batch = batch["anomalies"]
-                    elif isinstance(batch, dict):
-                        batch = [batch]
-                    if not isinstance(batch, list):
-                        raise ValueError(f"Expected list, got {type(batch).__name__}")
-                    for item in batch:
-                        line_num = item.get("line")
-                        content = next((c for ln, c in chunk if ln == line_num), "Unknown")
-                        chunk_results.append({
-                            "line": line_num, "content": content,
-                            "anomaly": True, "reason": item.get("reason", "Anomalous log line"),
-                        })
-                except Exception as e:
-                    logger.error("Failed to explain chunk lines %d-%d: %s", chunk[0][0], chunk[-1][0], e)
-                    for ln, c in chunk:
-                        chunk_results.append({
-                            "line": ln, "content": c,
-                            "anomaly": True, "reason": f"Explanation failed: {str(e)}",
-                        })
-                completed += 1
-                if progress_callback:
-                    await progress_callback(completed, total_chunks)
-                return chunk_results
+                return explanations_for_chunk(chunk, parse_llm_list(text))
+            except Exception as e:
+                logger.error("Failed to explain chunk lines %d-%d: %s", chunk[0][0], chunk[-1][0], e)
+                return failed_chunk(chunk, e, anomaly=True)
 
-        tasks = [explain_chunk(chunk) for chunk in chunks]
-        all_results = await asyncio.gather(*tasks)
-        results = []
-        for cr in all_results:
-            results.extend(cr)
-        results.sort(key=lambda r: r["line"])
-        return results
+        return await self._run_chunks(logs, 125, explain_chunk, progress_callback)
 
     # -- internal helpers ----------------------------------------------------
 
-    async def _analyze_line_by_line(self, logs, progress_callback=None):
-        total = len(logs)
-        semaphore = asyncio.Semaphore(self.max_concurrency)
-        completed = 0
-
-        async def process_one(line_num, content):
-            nonlocal completed
-            async with semaphore:
-                prompt = (
-                    "Analyze the following log line for anomalies.\n"
-                    "Is it an anomaly? Respond in JSON format with 'anomaly' (boolean) and 'reason' (string).\n"
-                    f"Log: {content}"
-                )
-                result = {"line": line_num, "content": content, "anomaly": False, "reason": "Analysis failed"}
-                try:
-                    text = await self._call_with_retry(prompt, context=f"line {line_num}")
-                    data = json.loads(text)
-                    result = {
-                        "line": line_num, "content": content,
-                        "anomaly": data.get("anomaly", False),
-                        "reason": data.get("reason", "N/A"),
-                    }
-                except Exception as e:
-                    logger.error("Failed to analyze line %d: %s", line_num, e)
-                completed += 1
-                if progress_callback:
-                    await progress_callback(completed, total)
-                return result
-
-        tasks = [process_one(ln, c) for ln, c in logs]
-        results = await asyncio.gather(*tasks)
-        results.sort(key=lambda r: r["line"])
-        return results
-
-    async def _analyze_chunked(self, logs, chunk_size=10, progress_callback=None):
+    async def _run_chunks(self, logs, chunk_size, worker, progress_callback):
         chunks = [logs[i:i + chunk_size] for i in range(0, len(logs), chunk_size)]
         total_chunks = len(chunks)
         semaphore = asyncio.Semaphore(self.max_concurrency)
         completed = 0
 
-        async def process_chunk(chunk):
+        async def run(chunk):
             nonlocal completed
             async with semaphore:
-                chunk_line_nums = [ln for ln, _ in chunk]
-                chunk_text = "\n".join([f"Line {ln}: {c}" for ln, c in chunk])
-                prompt = (
-                    "Analyze the following batch of logs for anomalies.\n"
-                    "Identify any lines that are unusual, indicate errors, or show suspicious patterns.\n"
-                    "Respond in JSON as a list of objects, each containing 'line' (integer), "
-                    "'anomaly' (boolean), and 'reason' (string).\n"
-                    "Only include lines that ARE anomalies.\n"
-                    "\n"
-                    f"Logs:\n{chunk_text}"
-                )
-                chunk_results = []
-                try:
-                    text = await self._call_with_retry(
-                        prompt, context=f"chunk lines {chunk[0][0]}-{chunk[-1][0]}",
-                    )
-                    batch = json.loads(text)
-                    if isinstance(batch, dict) and "anomalies" in batch:
-                        batch = batch["anomalies"]
-                    elif isinstance(batch, dict):
-                        batch = [batch]
-                    if not isinstance(batch, list):
-                        raise ValueError(f"Expected list, got {type(batch).__name__}")
-                    for res in batch:
-                        if res.get("anomaly") and res.get("line") in chunk_line_nums:
-                            content = next((c for ln, c in chunk if ln == res["line"]), "Unknown")
-                            chunk_results.append({
-                                "line": res["line"], "content": content,
-                                "anomaly": True, "reason": res.get("reason", "N/A"),
-                            })
-                except Exception as e:
-                    logger.error("Failed to analyze chunk lines %d-%d: %s", chunk[0][0], chunk[-1][0], e)
-                    for ln, c in chunk:
-                        chunk_results.append({
-                            "line": ln, "content": c,
-                            "anomaly": False, "reason": f"Analysis failed: {str(e)}",
-                        })
-                completed += 1
-                if progress_callback:
-                    await progress_callback(completed, total_chunks)
-                return chunk_results
+                chunk_results = await worker(chunk)
+            completed += 1
+            if progress_callback:
+                await progress_callback(completed, total_chunks)
+            return chunk_results
 
-        tasks = [process_chunk(chunk) for chunk in chunks]
-        all_results = await asyncio.gather(*tasks)
-        results = []
-        for cr in all_results:
-            results.extend(cr)
+        all_results = await asyncio.gather(*(run(chunk) for chunk in chunks))
+        results = [r for chunk_results in all_results for r in chunk_results]
         results.sort(key=lambda r: r["line"])
         return results
+
+    async def _analyze_line_by_line(self, logs, progress_callback=None):
+        async def process_one(chunk):
+            line_num, content = chunk[0]
+            prompt = (
+                "Analyze the following log line for anomalies.\n"
+                "Is it an anomaly? Respond in JSON format with 'anomaly' (boolean) and 'reason' (string).\n"
+                f"Log: {content}"
+            )
+            try:
+                text = await self._call_with_retry(prompt, context=f"line {line_num}")
+                items = parse_llm_list(text)
+                data = items[0] if items else {}
+                return [{
+                    "line": line_num, "content": content,
+                    "anomaly": bool(data.get("anomaly", False)),
+                    "reason": str(data.get("reason", "N/A")),
+                }]
+            except Exception as e:
+                logger.error("Failed to analyze line %d: %s", line_num, e)
+                return failed_chunk(chunk, e, anomaly=False)
+
+        return await self._run_chunks(logs, 1, process_one, progress_callback)
+
+    async def _analyze_chunked(self, logs, chunk_size=10, progress_callback=None):
+        async def process_chunk(chunk):
+            chunk_text = "\n".join(f"Line {ln}: {c}" for ln, c in chunk)
+            prompt = (
+                "Analyze the following batch of logs for anomalies.\n"
+                "Identify any lines that are unusual, indicate errors, or show suspicious patterns.\n"
+                "Respond in JSON as a list of objects, each containing 'line' (integer), "
+                "'anomaly' (boolean), and 'reason' (string).\n"
+                "Only include lines that ARE anomalies.\n"
+                "\n"
+                f"Logs:\n{chunk_text}"
+            )
+            try:
+                text = await self._call_with_retry(
+                    prompt, context=f"chunk lines {chunk[0][0]}-{chunk[-1][0]}",
+                )
+                return anomalies_for_chunk(chunk, parse_llm_list(text))
+            except Exception as e:
+                logger.error("Failed to analyze chunk lines %d-%d: %s", chunk[0][0], chunk[-1][0], e)
+                return failed_chunk(chunk, e, anomaly=False)
+
+        return await self._run_chunks(logs, chunk_size, process_chunk, progress_callback)
 
 
 # ---------------------------------------------------------------------------
@@ -463,7 +401,7 @@ _validation_cooldowns: dict[str, float] = {}
 
 async def validate_api_key(google_api_key: str) -> dict:
     """Validate a Gemini API key, returning available models.
-    
+
     Cached per key for 5 minutes so page refreshes don't call the API.
     Uses the same shared rate limiter so validation doesn't steal
     capacity from analysis calls for the same key.
@@ -500,6 +438,6 @@ async def validate_api_key(google_api_key: str) -> dict:
         if e.code == 429:
             _validation_cooldowns[k] = time.monotonic() + 30.0
             logger.warning("Validation rate-limited, cooling down for 30s")
-        raise ValueError(f"{e.message or str(e)}")
+        raise ValueError(f"{e.message or str(e)}") from e
     except Exception as e:
-        raise ValueError(f"Could not validate API key: {e}")
+        raise ValueError(f"Could not validate API key: {e}") from e

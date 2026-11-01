@@ -1,0 +1,20 @@
+[project]
+name = "log-anomaly-detector"
+version = "1.0.0"
+description = "Two-stage log anomaly detection: an unsupervised ML pre-filter (SOM) followed by LLM analysis via Ollama or Gemini."
+readme = "README.md"
+license = { text = "GPL-3.0-or-later" }
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["B008", "UP006", "UP035"]
